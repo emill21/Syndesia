@@ -1,0 +1,13 @@
+# libadb-android looks Conscrypt up by reflection and loads SPAKE2 through JNI.
+-keep class io.github.muntashirakon.** { *; }
+-keep class org.conscrypt.** { *; }
+-keep class org.bouncycastle.** { *; }
+-dontwarn io.github.muntashirakon.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn com.android.org.conscrypt.**
+-dontwarn org.apache.harmony.xnet.provider.jsse.**
+-dontwarn javax.naming.**
+-dontwarn sun.security.**
+-dontwarn java.lang.invoke.**
+-keepclasseswithmembernames class * { native <methods>; }

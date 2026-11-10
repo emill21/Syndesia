@@ -1,0 +1,268 @@
+package com.syndesia.app.ui
+
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Android
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Error
+import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.Layers
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Upload
+import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material.icons.rounded.Watch
+import androidx.compose.material.icons.rounded.LinkOff
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.syndesia.app.adb.InstallItem
+import com.syndesia.app.adb.InstallStatus
+import com.syndesia.app.adb.Installer
+import com.syndesia.app.adb.Link
+import com.syndesia.app.adb.Watch
+import kotlinx.coroutines.launch
+
+@Composable
+fun InstallScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: (STab) -> Unit) {
+    val items by Installer.items.collectAsStateWithLifecycle()
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        st.addApks(uris)
+    }
+    val connected = link is Link.Connected
+    val queued = items.count { it.status == InstallStatus.Queued }
+    val running = items.any { it.status is InstallStatus.Sending || it.status == InstallStatus.Installing }
+    val finished = items.count { it.status == InstallStatus.Done || it.status is InstallStatus.Failed }
+
+    LazyColumn(contentPadding = padding.withPage(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        animatedItem(0) {
+            PickCard(
+                connected = connected,
+                preparing = st.preparing,
+                onPick = { picker.launch(arrayOf("*/*")) },
+                onConnect = { onTab(STab.Watch) },
+            )
+        }
+        if (st.problems.isNotEmpty()) {
+            item {
+                SectionCard(container = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)) {
+                    st.problems.forEach { p -> Tip(Icons.Rounded.Warning, p) }
+                    TextButton(onClick = { st.problems = emptyList() }, modifier = Modifier.padding(start = 8.dp)) { Text("Dismiss") }
+                }
+            }
+        }
+        if (items.isNotEmpty()) {
+            item {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    SectionHeader("Queue", Modifier.weight(1f))
+                    if (finished > 0 && !running) TextButton(onClick = { Installer.clearFinished() }) { Text("Clear finished") }
+                    if (running) TextButton(onClick = { Installer.cancel() }) { Text("Stop") }
+                }
+            }
+            items(items, key = { it.pkg.id }) { item -> InstallRow(st, item, connected) }
+            if (queued > 0) item {
+                Button(
+                    onClick = { Installer.start() },
+                    enabled = connected && !running,
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                ) {
+                    Icon(Icons.Rounded.Upload, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (!connected) "Connect a watch to install"
+                        else if (queued == 1) "Install on watch" else "Install all $queued",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
+            }
+        } else {
+            animatedItem(1) {
+                SectionCard(title = "Good to know") {
+                    Tip(Icons.Rounded.FolderOpen, "Open or share an APK from any app (Files, Chrome, Telegram…) and pick Syndesia to send it here.")
+                    Tip(Icons.Rounded.Layers, "Split apps: pick all their APKs together, or pick the .apks / .xapk bundle.")
+                    Tip(Icons.Rounded.Watch, "Look for the Wear OS badge. Phone-only apps usually install but may not open on a watch.")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PickCard(connected: Boolean, preparing: Boolean, onPick: () -> Unit, onConnect: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    GradientCard(top = colors.primaryContainer.copy(alpha = 0.8f), bottom = colors.surfaceContainerLow) {
+        Column(Modifier.fillMaxWidth().padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            IconBadge(Icons.Rounded.Android, colors.primary, size = 72.dp)
+            Spacer(Modifier.height(14.dp))
+            Text("Install apps on your watch", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                "APK, split APKs, .apks, .xapk",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = onPick, enabled = !preparing, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                if (preparing) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = colors.onPrimary)
+                    Spacer(Modifier.width(10.dp))
+                    Text("Reading files…")
+                } else {
+                    Icon(Icons.Rounded.FolderOpen, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Choose APKs", style = MaterialTheme.typography.titleMedium)
+                }
+            }
+            if (!connected) {
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.LinkOff, null, Modifier.size(18.dp), tint = colors.onSurfaceVariant)
+                    Spacer(Modifier.width(6.dp))
+                    Text("No watch connected.", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                    TextButton(onClick = onConnect) { Text("Connect") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InstallRow(st: SyndesiaState, item: InstallItem, connected: Boolean) {
+    val colors = MaterialTheme.colorScheme
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val p = item.pkg
+    Card(
+        shape = CardShape,
+        colors = CardDefaults.cardColors(containerColor = colors.surfaceContainerLow),
+        modifier = Modifier.fillMaxWidth().animateContentSize(),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val icon = p.icon
+                if (icon != null) {
+                    Image(icon.asImageBitmap(), null, Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)))
+                } else IconBadge(Icons.Rounded.Android, colors.primary, 48.dp)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(p.label, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        listOfNotNull(p.versionName?.let { "v$it" }, formatBytes(p.totalBytes), p.packageName).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                val removable = item.status == InstallStatus.Queued || item.status == InstallStatus.Done || item.status is InstallStatus.Failed
+                if (removable) IconButton(onClick = { Installer.remove(p.id) }) { Icon(Icons.Rounded.Close, "Remove") }
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                when (p.wearApp) {
+                    true -> Pill("Wear OS app", Icons.Rounded.Watch, colors.primaryContainer, colors.onPrimaryContainer)
+                    false -> Pill("Phone app", Icons.Rounded.PhoneAndroid, colors.tertiaryContainer, colors.onTertiaryContainer)
+                    null -> {}
+                }
+                if (p.isSplit) Pill("${p.files.size} APKs", Icons.Rounded.Layers, colors.secondaryContainer, colors.onSecondaryContainer)
+            }
+            val watchSdk = com.syndesia.app.adb.Adb.connected?.sdk
+            if (p.minSdk != null && watchSdk != null && watchSdk in 1 until p.minSdk && item.status == InstallStatus.Queued) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Needs Android API ${p.minSdk}; this watch is on API $watchSdk, so it will probably be refused.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.error,
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            when (val s = item.status) {
+                InstallStatus.Queued -> Text(
+                    if (connected) "Ready to install" else "Waiting for a watch",
+                    style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant,
+                )
+                is InstallStatus.Sending -> {
+                    val f = if (s.total > 0) (s.sent.toFloat() / s.total).coerceIn(0f, 1f) else 0f
+                    Text("Sending to watch · ${(f * 100).toInt()}% of ${formatBytes(s.total)}", style = MaterialTheme.typography.labelLarge, color = colors.primary)
+                    Spacer(Modifier.height(6.dp))
+                    LinearProgressIndicator(progress = { f }, modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)))
+                }
+                InstallStatus.Installing -> {
+                    Text("Installing on watch…", style = MaterialTheme.typography.labelLarge, color = colors.primary)
+                    Spacer(Modifier.height(6.dp))
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)))
+                }
+                InstallStatus.Done -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.CheckCircle, null, tint = colors.primary, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(6.dp))
+                    val secs = ((item.finishedAt - item.startedAt) / 1000.0).coerceAtLeast(0.1)
+                    Text("Installed in ${String.format(java.util.Locale.US, "%.1f", secs)} s", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+                    val pkg = p.packageName
+                    if (pkg != null && connected) FilledTonalButton(onClick = {
+                        scope.launch { if (!runCatching { Watch.launch(pkg) }.getOrDefault(false)) ctx.toast("This app has no screen to open on the watch") }
+                    }) {
+                        Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Open on watch")
+                    }
+                }
+                is InstallStatus.Failed -> {
+                    Surface(shape = RoundedCornerShape(16.dp), color = colors.errorContainer, modifier = Modifier.fillMaxWidth()) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+                            Icon(Icons.Rounded.Error, null, tint = colors.onErrorContainer, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(s.message, style = MaterialTheme.typography.bodyMedium, color = colors.onErrorContainer)
+                                s.code?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = colors.onErrorContainer.copy(alpha = 0.7f)) }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledTonalButton(onClick = { Installer.retry(p.id) }, enabled = connected) {
+                            Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Try again")
+                        }
+                        if (s.code == "INSTALL_FAILED_VERSION_DOWNGRADE" && !st.allowDowngrade) {
+                            TextButton(onClick = { st.setDowngrade(true); Installer.retry(p.id) }) { Text("Allow downgrade") }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

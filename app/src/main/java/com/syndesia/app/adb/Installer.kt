@@ -1,0 +1,201 @@
+package com.syndesia.app.adb
+
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
+import java.io.BufferedOutputStream
+import java.io.File
+import java.io.IOException
+import kotlin.coroutines.coroutineContext
+
+sealed interface InstallStatus {
+    data object Queued : InstallStatus
+    data class Sending(val sent: Long, val total: Long) : InstallStatus
+    data object Installing : InstallStatus
+    data object Done : InstallStatus
+    data class Failed(val message: String, val code: String? = null) : InstallStatus
+}
+
+data class InstallItem(val pkg: ApkPackage, val status: InstallStatus = InstallStatus.Queued, val startedAt: Long = 0, val finishedAt: Long = 0)
+
+data class InstallOptions(
+    val downgrade: Boolean = false,
+    val grantPermissions: Boolean = false,
+)
+
+/** Install queue. Runs one app at a time; survives tab switches. */
+object Installer {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val _items = MutableStateFlow<List<InstallItem>>(emptyList())
+    val items: StateFlow<List<InstallItem>> = _items.asStateFlow()
+    private var worker: Job? = null
+    var options = InstallOptions()
+
+    /** Bumped after each successful install, so the Apps tab knows to refresh. */
+    private val _installed = MutableStateFlow(0)
+    val installed: StateFlow<Int> = _installed.asStateFlow()
+
+    fun add(pkgs: List<ApkPackage>) {
+        _items.update { it + pkgs.map { p -> InstallItem(p) } }
+    }
+
+    fun remove(id: Long) {
+        _items.update { list -> list.filterNot { it.pkg.id == id && it.status !is InstallStatus.Sending && it.status != InstallStatus.Installing } }
+    }
+
+    fun clearFinished() {
+        _items.update { list -> list.filter { it.status == InstallStatus.Queued || it.status is InstallStatus.Sending || it.status == InstallStatus.Installing } }
+    }
+
+    fun retry(id: Long) {
+        set(id) { it.copy(status = InstallStatus.Queued) }
+        start()
+    }
+
+    val busy: Boolean get() = worker?.isActive == true
+
+    /** Install everything queued, in order. */
+    fun start() {
+        if (worker?.isActive == true) return
+        worker = scope.launch {
+            while (true) {
+                val next = _items.value.firstOrNull { it.status == InstallStatus.Queued } ?: break
+                if (Adb.connected == null) break
+                set(next.pkg.id) { it.copy(status = InstallStatus.Sending(0, next.pkg.totalBytes), startedAt = System.currentTimeMillis()) }
+                val result = runCatching { install(next.pkg) }
+                set(next.pkg.id) {
+                    it.copy(
+                        status = result.fold(
+                            onSuccess = { InstallStatus.Done },
+                            onFailure = { e -> (e as? InstallFailure)?.let { f -> InstallStatus.Failed(f.message ?: "Install failed", f.code) } ?: InstallStatus.Failed(e.message ?: e.javaClass.simpleName) },
+                        ),
+                        finishedAt = System.currentTimeMillis(),
+                    )
+                }
+                if (result.isSuccess) _installed.value++
+            }
+        }
+    }
+
+    fun cancel() {
+        worker?.cancel()
+        _items.update { list ->
+            list.map {
+                if (it.status is InstallStatus.Sending || it.status == InstallStatus.Installing) it.copy(status = InstallStatus.Failed("Cancelled"))
+                else it
+            }
+        }
+    }
+
+    private fun set(id: Long, f: (InstallItem) -> InstallItem) {
+        _items.update { list -> list.map { if (it.pkg.id == id) f(it) else it } }
+    }
+
+    class InstallFailure(message: String, val code: String?) : IOException(message)
+
+    private fun flags(): String {
+        val sdk = Adb.connected?.sdk ?: 0
+        return buildString {
+            append("-r -t")
+            if (options.downgrade) append(" -d")
+            if (options.grantPermissions && sdk >= 23) append(" -g")
+            // Android 14+ blocks very old targetSdk apps unless asked not to; plenty of watch APKs are old.
+            if (sdk >= 34) append(" --bypass-low-target-sdk-block")
+        }
+    }
+
+    private suspend fun install(pkg: ApkPackage) {
+        val total = pkg.totalBytes
+        var base = 0L
+        val progress: (Long) -> Unit = { sent -> set(pkg.id) { it.copy(status = InstallStatus.Sending(base + sent, total)) } }
+        if (!pkg.isSplit) {
+            val f = pkg.files.first()
+            // Once every byte is on the watch, package manager verifies and installs it.
+            val out = streamInto("cmd package install ${flags()} -S ${f.length()}", f, progress) {
+                set(pkg.id) { it.copy(status = InstallStatus.Installing) }
+            }
+            check(out)
+            return
+        }
+        val created = Adb.sh("cmd package install-create ${flags()} -S $total")
+        val session = Regex("\\[(\\d+)]").find(created)?.groupValues?.get(1)
+            ?: throw failure(created)
+        try {
+            pkg.files.forEachIndexed { i, f ->
+                val name = "${i}_" + f.name.replace(Regex("[^A-Za-z0-9._-]"), "_")
+                val out = streamInto("cmd package install-write -S ${f.length()} $session $name -", f, progress)
+                if (!out.contains("Success")) throw failure(out)
+                base += f.length()
+            }
+            set(pkg.id) { it.copy(status = InstallStatus.Installing) }
+            check(Adb.sh("cmd package install-commit $session"))
+        } catch (e: Throwable) {
+            runCatching { Adb.sh("cmd package install-abandon $session") }
+            throw e
+        }
+    }
+
+    /** Opens `exec:<command>`, writes the file into its stdin, then returns everything it printed. */
+    private suspend fun streamInto(command: String, f: File, progress: (Long) -> Unit, afterSend: () -> Unit = {}): String {
+        val s = Adb.open("exec:$command")
+        try {
+            val out = BufferedOutputStream(s.asOutput(), writeChunk)
+            val buf = ByteArray(64 * 1024)
+            var sent = 0L
+            var lastTick = 0L
+            f.inputStream().use { input ->
+                while (true) {
+                    coroutineContext.ensureActive()
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                    sent += n
+                    val now = System.currentTimeMillis()
+                    if (now - lastTick > 80) { progress(sent); lastTick = now }
+                }
+            }
+            out.flush()
+            progress(sent)
+            afterSend()
+            return String(s.readAll(), Charsets.UTF_8)
+        } finally {
+            runCatching { s.close() }
+        }
+    }
+
+    private fun check(output: String) {
+        if (output.contains("Success")) return
+        throw failure(output)
+    }
+
+    private fun failure(output: String): InstallFailure {
+        val code = Regex("(INSTALL_[A-Z_]+|DELETE_[A-Z_]+)").find(output)?.value
+        val text = when (code) {
+            "INSTALL_FAILED_UPDATE_INCOMPATIBLE" -> "A version signed with a different key is already on the watch. Uninstall it first (Apps tab), then install again."
+            "INSTALL_FAILED_VERSION_DOWNGRADE" -> "The watch already has a newer version. Turn on \"Allow downgrades\" in Settings, or uninstall it first."
+            "INSTALL_FAILED_OLDER_SDK" -> "This app needs a newer version of Wear OS than the watch has."
+            "INSTALL_FAILED_NO_MATCHING_ABIS" -> "This APK is built for a different processor than the watch's."
+            "INSTALL_FAILED_INSUFFICIENT_STORAGE" -> "The watch is out of storage."
+            "INSTALL_FAILED_DEPRECATED_SDK_VERSION" -> "This app targets an Android version too old for this watch."
+            "INSTALL_FAILED_MISSING_SPLIT" -> "This app needs split APKs that weren't included. Pick all its APKs together, or use the .apks / .xapk bundle."
+            "INSTALL_FAILED_INVALID_APK", "INSTALL_PARSE_FAILED_NOT_APK" -> "The watch couldn't read this APK. It may be damaged or incomplete."
+            "INSTALL_PARSE_FAILED_NO_CERTIFICATES" -> "This APK isn't signed, so Android won't install it."
+            "INSTALL_FAILED_TEST_ONLY" -> "This is a test-only build the watch refused."
+            "INSTALL_FAILED_ALREADY_EXISTS" -> "The app is already installed."
+            "INSTALL_FAILED_USER_RESTRICTED" -> "The watch blocked installs over ADB."
+            "INSTALL_FAILED_VERIFICATION_FAILURE" -> "Google Play Protect on the watch rejected this app."
+            "INSTALL_FAILED_DUPLICATE_PERMISSION" -> "Another app on the watch already defines a permission this app uses."
+            else -> null
+        }
+        val raw = output.lines().firstOrNull { it.contains("Failure") || it.contains("Error") }?.trim()
+            ?: output.trim().lines().lastOrNull()?.trim().orEmpty()
+        return InstallFailure(text ?: raw.ifBlank { "The watch didn't confirm the install." }, code)
+    }
+}

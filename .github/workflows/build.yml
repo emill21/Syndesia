@@ -1,0 +1,43 @@
+name: Build APK
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build release APK
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --stacktrace
+          mv app/build/outputs/apk/release/app-release.apk Syndesia.apk
+          echo "VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)" >> "$GITHUB_ENV"
+      - name: Release notes
+        run: |
+          jq -r '.[0] | "## \(.title)\n\n" + (.items | map("- " + .) | join("\n"))' app/src/main/assets/changelog.json > notes.md
+          printf '\n\n**Install:** download **Syndesia.apk** below and open it on your phone. Updates install over the previous version and keep your paired watches.\n\nFull history: [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)\n' >> notes.md
+          cat notes.md
+      - name: Publish release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Syndesia ${{ env.VERSION }} (build ${{ github.run_number }})
+          body_path: notes.md
+          files: Syndesia.apk
+          make_latest: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Syndesia-apk
+          path: Syndesia.apk
