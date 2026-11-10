@@ -60,6 +60,10 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("system_apps", false)
         set(v) = sp.edit().putBoolean("system_apps", v).apply()
 
+    var askedNotifications: Boolean
+        get() = sp.getBoolean("asked_notif", false)
+        set(v) = sp.edit().putBoolean("asked_notif", v).apply()
+
     var installs: Int
         get() = sp.getInt("installs", 0)
         set(v) = sp.edit().putInt("installs", v).apply()

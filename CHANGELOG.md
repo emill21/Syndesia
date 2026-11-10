@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1 — 2026-11-10 · Stays connected
+
+- The watch now stays connected until you tap Disconnect or swipe Syndesia away from Recents, even while you're choosing files or using other apps
+- A quiet "Connected to your watch" notification keeps the link alive in the background, with a Disconnect button
+- Keep-alive pings stop the watch's Wi-Fi from dozing off mid-session
+- If the link drops for a moment, Syndesia reconnects by itself (and follows the watch to a new port)
+
 ## 1.0 — 2026-11-10 · Hello, Syndesia
 
 - Find watches on your Wi-Fi automatically, pair with the six-digit code, and reconnect on its own next time

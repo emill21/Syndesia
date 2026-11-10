@@ -192,9 +192,10 @@ private fun WatchHero(st: SyndesiaState, link: Link, stats: WatchStats?) {
                     }
                 }
                 is Link.Connecting -> {
-                    Text("Connecting…", style = MaterialTheme.typography.headlineMedium)
+                    Text(if (link.reconnecting) "Reconnecting…" else "Connecting…", style = MaterialTheme.typography.headlineMedium)
                     Text(
-                        if (link.waitingForApproval) "If the watch asks \"Allow debugging?\", tap Allow (tick \"Always allow\" to skip this next time)."
+                        if (link.reconnecting) "The connection dropped for a moment. Getting it back (${link.host}:${link.port})…"
+                        else if (link.waitingForApproval) "If the watch asks \"Allow debugging?\", tap Allow (tick \"Always allow\" to skip this next time)."
                         else "${link.host}:${link.port}",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onSurfaceVariant,

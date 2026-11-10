@@ -43,7 +43,7 @@ data class WatchInfo(
 
 sealed interface Link {
     data object Idle : Link
-    data class Connecting(val host: String, val port: Int, val waitingForApproval: Boolean = false) : Link
+    data class Connecting(val host: String, val port: Int, val waitingForApproval: Boolean = false, val reconnecting: Boolean = false) : Link
     data class Connected(val info: WatchInfo) : Link
     data class Failed(val host: String, val port: Int, val message: String, val needsPairing: Boolean = false) : Link
 }
@@ -79,10 +79,20 @@ object Adb {
     private val connectLock = Mutex()
     private var watchdog: Job? = null
 
-    /** Called when the link drops on its own, so the app can try to find the watch again. */
+    /** Called when the link drops for good (reconnecting gave up), so the app can look for the watch again. */
     var onLost: ((host: String, port: Int) -> Unit)? = null
 
     val connected: WatchInfo? get() = (_link.value as? Link.Connected)?.info
+
+    private var appContext: Context? = null
+
+    /** True from a successful connect until the user disconnects: while set, drops are reconnected automatically. */
+    @Volatile
+    private var wanted = false
+    private var reconnectJob: Job? = null
+
+    @Volatile
+    private var lastPing = 0L
 
     private fun manager(context: Context): Manager {
         manager?.let { return it }
@@ -92,6 +102,9 @@ object Adb {
 
     /** Throw away the cached identity (after [Keys.reset]). */
     fun resetIdentity() {
+        wanted = false
+        reconnectJob?.cancel()
+        watchdog?.cancel()
         runCatching { manager?.disconnect() }
         manager = null
         _link.value = Link.Idle
@@ -108,14 +121,20 @@ object Adb {
         }
     }
 
-    suspend fun connect(context: Context, host: String, port: Int): Result<WatchInfo> = withContext(Dispatchers.IO) {
+    /** User-initiated connect. Cancels any automatic reconnect in progress. */
+    suspend fun connect(context: Context, host: String, port: Int): Result<WatchInfo> {
+        reconnectJob?.cancel()
+        return connectOnce(context.applicationContext, host, port, reconnecting = false)
+    }
+
+    private suspend fun connectOnce(context: Context, host: String, port: Int, reconnecting: Boolean): Result<WatchInfo> = withContext(Dispatchers.IO) {
         connectLock.withLock {
             val m = manager(context)
             runCatching { m.disconnect() }
             watchdog?.cancel()
-            _link.value = Link.Connecting(host, port)
+            _link.value = Link.Connecting(host, port, reconnecting = reconnecting)
             // A slow "Allow debugging?" prompt on older watches: flag it so the UI can say so.
-            val hint = scope.launch {
+            val hint = if (reconnecting) null else scope.launch {
                 delay(3500)
                 val l = _link.value
                 if (l is Link.Connecting && l.host == host && l.port == port) _link.value = l.copy(waitingForApproval = true)
@@ -127,20 +146,33 @@ object Adb {
                 writeChunk = runCatching { m.adbConnection?.maxData ?: 4096 }.getOrDefault(4096).coerceIn(4096, 256 * 1024)
                 readInfo(host, port)
             }
-            hint.cancel()
+            hint?.cancel()
             result.onSuccess {
-                _link.value = Link.Connected(it)
-                startWatchdog(host, port)
+                if (reconnecting && !wanted) {
+                    // The user disconnected while we were reconnecting.
+                    runCatching { m.disconnect() }
+                    _link.value = Link.Idle
+                } else {
+                    appContext = context
+                    wanted = true
+                    _link.value = Link.Connected(it)
+                    startWatchdog()
+                }
             }.onFailure { e ->
                 runCatching { m.disconnect() }
-                val pairing = e is AdbPairingRequiredException || e.cause is AdbPairingRequiredException
-                _link.value = Link.Failed(host, port, friendly(e, pairing = false), needsPairing = pairing)
+                if (!reconnecting) {
+                    val pairing = e is AdbPairingRequiredException || e.cause is AdbPairingRequiredException
+                    _link.value = Link.Failed(host, port, friendly(e, pairing = false), needsPairing = pairing)
+                }
             }
             result
         }
     }
 
+    /** Only the user (or closing the app) ends the link. */
     suspend fun disconnect() = withContext(Dispatchers.IO) {
+        wanted = false
+        reconnectJob?.cancel()
         watchdog?.cancel()
         runCatching { manager?.disconnect() }
         _link.value = Link.Idle
@@ -151,19 +183,66 @@ object Adb {
         if (_link.value is Link.Failed) _link.value = Link.Idle
     }
 
-    private fun startWatchdog(host: String, port: Int) {
+    /**
+     * Keep-alive: a tiny command every few seconds. It keeps the watch's Wi-Fi from dozing off and
+     * notices a dead link (watch left Wi-Fi, debugging switched off) within ~30 s.
+     */
+    private fun startWatchdog() {
         watchdog?.cancel()
+        lastPing = System.currentTimeMillis()
         watchdog = scope.launch {
             while (isActive) {
-                delay(5000)
+                delay(6000)
                 val m = manager ?: break
-                if (_link.value !is Link.Connected) break
-                if (!m.isConnected) {
-                    runCatching { m.disconnect() }
-                    _link.value = Link.Failed(host, port, "Lost the connection to the watch.")
-                    onLost?.invoke(host, port)
+                val l = _link.value as? Link.Connected ?: break
+                if (!m.isConnected || System.currentTimeMillis() - lastPing > 30_000) {
+                    lost(l.info)
                     break
                 }
+                scope.launch {
+                    runCatching {
+                        val st = m.openStream("exec:echo")
+                        try { st.readAll() } finally { runCatching { st.close() } }
+                    }.onSuccess { lastPing = System.currentTimeMillis() }
+                }
+            }
+        }
+    }
+
+    private fun lost(info: WatchInfo) {
+        watchdog?.cancel()
+        runCatching { manager?.disconnect() }
+        val ctx = appContext
+        if (wanted && ctx != null) reconnect(ctx, info)
+        else {
+            _link.value = Link.Failed(info.host, info.port, "Lost the connection to the watch.")
+            onLost?.invoke(info.host, info.port)
+        }
+    }
+
+    /** Try to get the link back for two minutes, using a new port from mDNS if the watch advertises one. */
+    private fun reconnect(ctx: Context, info: WatchInfo) {
+        reconnectJob?.cancel()
+        reconnectJob = scope.launch {
+            val deadline = System.currentTimeMillis() + 120_000
+            var attempt = 0
+            _link.value = Link.Connecting(info.host, info.port, reconnecting = true)
+            while (isActive && wanted && System.currentTimeMillis() < deadline) {
+                val f = Discovery.found.value.firstOrNull {
+                    it.host == info.host || (info.serial.isNotBlank() && it.serial == info.serial)
+                }
+                val host = f?.host ?: info.host
+                val port = f?.connectPort ?: info.port
+                val r = connectOnce(ctx, host, port, reconnecting = true)
+                if (r.isSuccess) return@launch
+                val e = r.exceptionOrNull()
+                if (e is AdbPairingRequiredException || e?.cause is AdbPairingRequiredException) break
+                delay(if (attempt++ < 5) 2000 else 5000)
+            }
+            if (wanted && isActive) {
+                wanted = false
+                _link.value = Link.Failed(info.host, info.port, "Lost the connection to the watch. Check it's still on Wi-Fi with Wireless debugging on.")
+                onLost?.invoke(info.host, info.port)
             }
         }
     }
@@ -204,13 +283,6 @@ object Adb {
             if (!m.isConnected) _link.value.let { l -> if (l is Link.Connected) lost(l.info) }
             throw e
         }
-    }
-
-    private fun lost(info: WatchInfo) {
-        watchdog?.cancel()
-        runCatching { manager?.disconnect() }
-        _link.value = Link.Failed(info.host, info.port, "Lost the connection to the watch.")
-        onLost?.invoke(info.host, info.port)
     }
 
     /** Run a shell command on the watch and return everything it printed (stdout and stderr). */

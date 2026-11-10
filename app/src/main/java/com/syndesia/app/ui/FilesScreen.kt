@@ -135,7 +135,8 @@ fun FilesScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: (S
         LazyColumn(contentPadding = padding.withPage(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             animatedItem(0) {
                 EmptyState(
-                    Icons.Rounded.Folder, "No watch connected",
+                    Icons.Rounded.Folder,
+                    if ((link as? Link.Connecting)?.reconnecting == true) "Reconnecting to your watch…" else "No watch connected",
                     "Connect your watch to browse its storage, send files to it and save files from it.",
                     "Connect", onAction = { onTab(STab.Watch) },
                 )

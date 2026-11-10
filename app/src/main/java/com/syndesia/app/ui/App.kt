@@ -1,6 +1,13 @@
 package com.syndesia.app.ui
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import com.syndesia.app.LinkService
 import android.net.Uri
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
@@ -277,8 +284,20 @@ fun SyndesiaApp(onReplayTour: () -> Unit) {
     LaunchedEffect(incoming) {
         if (incoming.isNotEmpty()) st.accept(Incoming.take()) { tab = it }
     }
-    LaunchedEffect(link) {
-        if (link is Link.Connected) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+    // Ask once for notifications so the "Connected" notice (with its Disconnect button) shows.
+    val notifyPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val isConnected = link is Link.Connected
+    LaunchedEffect(isConnected) {
+        if (!isConnected) return@LaunchedEffect
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        // Keep the link alive in the background until the user disconnects or closes the app.
+        LinkService.start(ctx)
+        if (Build.VERSION.SDK_INT >= 33 && !st.prefs.askedNotifications &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            st.prefs.askedNotifications = true
+            notifyPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
 
     // "What's new" once after each update (not on a fresh install).
@@ -356,7 +375,7 @@ private fun ConnectionChip(link: Link, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val (text, on) = when (link) {
         is Link.Connected -> link.info.model to true
-        is Link.Connecting -> "Connecting…" to false
+        is Link.Connecting -> (if (link.reconnecting) "Reconnecting…" else "Connecting…") to false
         is Link.Failed -> "Not connected" to false
         Link.Idle -> "No watch" to false
     }

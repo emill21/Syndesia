@@ -88,7 +88,8 @@ fun AppsScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: (ST
         LazyColumn(contentPadding = padding.withPage()) {
             animatedItem(0) {
                 EmptyState(
-                    Icons.Rounded.Apps, "No watch connected",
+                    Icons.Rounded.Apps,
+                    if ((link as? Link.Connecting)?.reconnecting == true) "Reconnecting to your watch…" else "No watch connected",
                     "Connect your watch to see the apps on it, open them, save their APKs or uninstall them.",
                     "Connect", onAction = { onTab(STab.Watch) },
                 )
