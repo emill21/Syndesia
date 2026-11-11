@@ -245,7 +245,10 @@ class SyndesiaState(private val ctx: Context) {
                 val creds = Hotspot.start(ctx)
                 hotspotStage = "Asking your watch to join it…"
                 val addr = Helper.joinHotspot(ctx, creds) { stage ->
-                    if (stage == "joining") hotspotStage = "Your watch is joining ${creds.ssid}…"
+                    when (stage) {
+                        "joining" -> hotspotStage = "Your watch is joining ${creds.ssid}…"
+                        "approve" -> hotspotStage = "On your watch, tap Connect to join ${creds.ssid}"
+                    }
                 }
                 val ip = addr.substringBefore(':')
                 val reported = addr.substringAfter(':', "").toIntOrNull()

@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.7.2",
+    "date": "2026-11-11",
+    "title": "Hotspot joining fix",
+    "items": [
+      "Fixed: the watch getting stuck joining the phone's hotspot. If it doesn't join on its own within 15 seconds, the watch now asks you to tap Connect, and Syndesia tells you on the phone",
+      "Syndesia will offer to update the watch app over Bluetooth first"
+    ]
+  },
+  {
     "version": "1.7.1",
     "date": "2026-11-11",
     "title": "Hotspot fix",

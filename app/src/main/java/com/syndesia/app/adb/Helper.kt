@@ -37,7 +37,7 @@ object Helper {
     private const val PATH_PING = "/syndesia/ping"
 
     /** First watch-app version that can join the phone's hotspot. */
-    const val MIN_HOTSPOT_VERSION = 9L
+    const val MIN_HOTSPOT_VERSION = 11L
 
     /** The watch app is too old (or not answering) for what was asked. */
     class Outdated(message: String) : IOException(message)
@@ -221,7 +221,8 @@ object Helper {
             // The watch says "joining" straight away; if it doesn't, it never got the message.
             withTimeoutOrNull(10_000) { replies.first { it != null } }
                 ?: throw IOException("Your watch didn't respond. Open Syndesia on the watch once, then try again.")
-            val r = withTimeoutOrNull(60_000) {
+            // Allow time for "Connect to …?" on the watch.
+            val r = withTimeoutOrNull(150_000) {
                 var last: String? = null
                 replies.first { rep ->
                     if (rep != null && rep.stage != last) { last = rep.stage; onStage(rep.stage) }

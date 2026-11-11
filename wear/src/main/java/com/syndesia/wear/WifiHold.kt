@@ -77,6 +77,7 @@ object WifiHold {
     @Synchronized
     fun release(context: Context) {
         main.removeCallbacks(timeout)
+        HotspotJoin.release(context.applicationContext)
         val cb = callback ?: return
         callback = null
         runCatching { context.applicationContext.getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) }

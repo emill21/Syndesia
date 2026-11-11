@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.2 — 2026-11-11 · Hotspot joining fix
+
+- Fixed: the watch getting stuck joining the phone's hotspot. If it doesn't join on its own within 15 seconds, the watch now asks you to tap Connect, and Syndesia tells you on the phone
+- Syndesia will offer to update the watch app over Bluetooth first
+
 ## 1.7.1 — 2026-11-11 · Hotspot fix
 
 - Fixed: Connect via phone hotspot spinning forever when the watch app was too old. Syndesia now checks the watch app's version first and offers to update it

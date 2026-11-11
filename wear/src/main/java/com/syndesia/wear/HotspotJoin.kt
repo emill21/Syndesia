@@ -2,7 +2,12 @@ package com.syndesia.wear
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.net.wifi.WifiNetworkSpecifier
+import kotlinx.coroutines.CompletableDeferred
 import android.net.wifi.WifiManager
 import android.net.wifi.WifiNetworkSuggestion
 import kotlinx.coroutines.CoroutineScope
@@ -50,7 +55,8 @@ object HotspotJoin {
             current = suggestion
             // Asking for Wi-Fi makes Wear OS bring it up even while Bluetooth is connected.
             WifiKeeper.start(ctx)
-            val ip = withTimeoutOrNull(45_000) {
+            // 1) Quiet way: let Wear OS auto-join the suggested network.
+            var ip = withTimeoutOrNull(15_000) {
                 var found: String? = null
                 while (found == null) {
                     found = hotspotAddress(ctx, ssid)
@@ -58,10 +64,15 @@ object HotspotJoin {
                 }
                 found
             }
+            // 2) Direct way: ask for exactly this network. The watch shows "Connect to <name>?" once.
+            if (ip == null) {
+                Receiver.result(ctx, node, id, "approve")
+                ip = requestDirect(ctx, ssid, pass, wpa3)
+            }
             if (ip == null) {
                 Receiver.result(
                     ctx, node, id, "failed",
-                    "The watch didn't join ${ssid}. If it asked to allow Syndesia's suggested networks, tap Allow, then try again.",
+                    "The watch couldn't join $ssid. Make sure you tapped Connect on the watch. If it never asked, the watch may not see the hotspot: some watches only use 2.4 GHz Wi-Fi.",
                 )
                 return@launch
             }
@@ -71,6 +82,49 @@ object HotspotJoin {
             val port = tlsPort()
             Receiver.result(ctx, node, id, "joined", if (port != null) "$ip:$port" else ip)
         }
+    }
+
+    private var direct: ConnectivityManager.NetworkCallback? = null
+
+    /** Drop the direct hotspot connection (when the phone says it's done). */
+    fun release(ctx: Context) {
+        val cb = direct ?: return
+        direct = null
+        runCatching { ctx.getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(cb) }
+    }
+
+    /**
+     * Connect to exactly this network with a WifiNetworkSpecifier. Android asks the user to confirm on
+     * the watch. The request stays registered (keeping the connection) until [release].
+     */
+    private suspend fun requestDirect(ctx: Context, ssid: String, pass: String, wpa3: Boolean): String? {
+        release(ctx)
+        val cm = ctx.getSystemService(ConnectivityManager::class.java)
+        val spec = WifiNetworkSpecifier.Builder()
+            .setSsid(ssid)
+            .apply { if (wpa3) setWpa3Passphrase(pass) else setWpa2Passphrase(pass) }
+            .build()
+        val request = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .setNetworkSpecifier(spec)
+            .build()
+        val got = CompletableDeferred<String?>()
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onLinkPropertiesChanged(network: Network, lp: LinkProperties) {
+                val a = lp.linkAddresses.firstOrNull { it.address is Inet4Address }?.address?.hostAddress
+                if (a != null) got.complete(a)
+            }
+
+            override fun onUnavailable() {
+                got.complete(null)
+            }
+        }
+        return runCatching {
+            cm.requestNetwork(request, cb)
+            direct = cb
+            withTimeoutOrNull(90_000) { got.await() }
+        }.getOrNull().also { if (it == null) release(ctx) }
     }
 
     /** Our IPv4 address on Wi-Fi, once we're on the phone's hotspot. */
