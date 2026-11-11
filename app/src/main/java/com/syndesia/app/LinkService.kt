@@ -63,8 +63,9 @@ class LinkService : Service() {
                         else -> {
                             // User disconnected: let the watch drop Wi-Fi again.
                             if (Adb.userDisconnected) Helper.releaseAsync(applicationContext)
-                            // No link any more: don't leave the phone's hotspot running.
-                            Hotspot.stop()
+                            // No link any more: don't leave the phone's hotspot running
+                            // (unless Syndesia is busy getting the watch onto it right now).
+                            if (Adb.userDisconnected) Hotspot.stop() else if (!Hotspot.inUse) Hotspot.stopLater()
                             stop()
                         }
                     }

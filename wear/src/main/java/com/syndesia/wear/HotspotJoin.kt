@@ -13,6 +13,7 @@ import android.net.wifi.WifiNetworkSuggestion
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -55,19 +56,23 @@ object HotspotJoin {
             current = suggestion
             // Asking for Wi-Fi makes Wear OS bring it up even while Bluetooth is connected.
             WifiKeeper.start(ctx)
-            // 1) Quiet way: let Wear OS auto-join the suggested network.
-            var ip = withTimeoutOrNull(15_000) {
+            // Both at once, so you're never waiting: the quiet suggestion (Wear OS may just join it),
+            // and a direct request for exactly this network ("Connect to <name>?" on the watch).
+            Receiver.result(ctx, node, id, "approve")
+            val directJob = async { requestDirect(ctx, ssid, pass, wpa3) }
+            val ip = withTimeoutOrNull(100_000) {
                 var found: String? = null
                 while (found == null) {
-                    found = hotspotAddress(ctx, ssid)
-                    if (found == null) delay(700)
+                    if (directJob.isCompleted) found = directJob.await() ?: hotspotAddress(ctx, ssid)
+                    else found = hotspotAddress(ctx, ssid)
+                    if (found == null) {
+                        if (directJob.isCompleted) {
+                            // The direct request ended without a network (declined or failed); keep polling briefly.
+                            delay(700)
+                        } else delay(500)
+                    }
                 }
                 found
-            }
-            // 2) Direct way: ask for exactly this network. The watch shows "Connect to <name>?" once.
-            if (ip == null) {
-                Receiver.result(ctx, node, id, "approve")
-                ip = requestDirect(ctx, ssid, pass, wpa3)
             }
             if (ip == null) {
                 Receiver.result(

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.8.2 — 2026-11-11 · Hotspot timing fix
+
+- Fixed: the phone's hotspot switching off before the watch could join it, which also made a new hotspot appear on every try
+- The watch now asks "Connect to …?" straight away instead of after 15 seconds
+- If a try doesn't work, the hotspot stays on for two minutes so trying again uses the same network
+- Syndesia will offer to update the watch app over Bluetooth first
+
 ## 1.8.1 — 2026-11-11 · Smoother mouse
 
 - Smoother mouse: the cursor glides between updates instead of jumping, the watch sends movement twice as often, and acceleration ramps up gently

@@ -90,9 +90,29 @@ object Hotspot {
         return Credentials(ssid, pass, false)
     }
 
+    /** True while Syndesia is in the middle of getting the watch onto the hotspot: never stop it then. */
+    @Volatile
+    var inUse = false
+
+    private val main = Handler(Looper.getMainLooper())
+    private val stopTask = Runnable { if (!inUse) stop() }
+
     fun stop() {
+        main.removeCallbacks(stopTask)
         runCatching { reservation?.close() }
         reservation = null
         _creds.value = null
     }
+
+    /**
+     * Keep it on a little longer (so a retry reuses the same network the watch already knows),
+     * then switch it off.
+     */
+    fun stopLater(ms: Long = 120_000) {
+        if (_creds.value == null) return
+        main.removeCallbacks(stopTask)
+        main.postDelayed(stopTask, ms)
+    }
+
+    fun cancelStopLater() = main.removeCallbacks(stopTask)
 }

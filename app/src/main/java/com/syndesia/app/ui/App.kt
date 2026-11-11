@@ -240,6 +240,8 @@ class SyndesiaState(private val ctx: Context) {
         if (hotspotStage != null) return
         scope.launch {
             var ok = false
+            Hotspot.inUse = true
+            Hotspot.cancelStopLater()
             try {
                 hotspotStage = "Starting your phone's hotspot…"
                 val creds = Hotspot.start(ctx)
@@ -282,7 +284,9 @@ class SyndesiaState(private val ctx: Context) {
                 notice = e.message ?: "Couldn't connect through the hotspot"
             } finally {
                 hotspotStage = null
-                if (!ok) Hotspot.stop()
+                Hotspot.inUse = false
+                // Leave it on for a couple of minutes so trying again reuses the same network.
+                if (!ok) Hotspot.stopLater()
             }
         }
     }

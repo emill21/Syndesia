@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.8.2",
+    "date": "2026-11-11",
+    "title": "Hotspot timing fix",
+    "items": [
+      "Fixed: the phone's hotspot switching off before the watch could join it, which also made a new hotspot appear on every try",
+      "The watch now asks \"Connect to …?\" straight away instead of after 15 seconds",
+      "If a try doesn't work, the hotspot stays on for two minutes so trying again uses the same network",
+      "Syndesia will offer to update the watch app over Bluetooth first"
+    ]
+  },
+  {
     "version": "1.8.1",
     "date": "2026-11-11",
     "title": "Smoother mouse",
