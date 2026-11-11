@@ -172,6 +172,9 @@ object Apk {
         )
     }
 
+    /** Describe an APK that's already a local file (e.g. the bundled watch helper). */
+    fun fromFile(context: Context, file: File): ApkPackage? = describe(context, listOf(file), file.name)
+
     /** Clear unpacked files from earlier sessions. */
     fun cleanCache(context: Context) {
         runCatching { File(context.cacheDir, "incoming").deleteRecursively() }

@@ -14,8 +14,8 @@ android {
         applicationId = "com.syndesia.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = project.findProperty("syndesiaVersionCode").toString().toInt()
+        versionName = project.findProperty("syndesiaVersionName").toString()
     }
 
     // One fixed key for every build, so new versions install over old ones.
@@ -66,6 +66,18 @@ android {
     }
 }
 
+// Bundle the watch helper APK into the phone app, so Syndesia can install it on the watch itself.
+val wearAssets = layout.buildDirectory.dir("generated/wearAssets")
+val embedWearApk = tasks.register<Copy>("embedWearApk") {
+    dependsOn(":wear:assembleRelease")
+    from(project(":wear").layout.buildDirectory.file("outputs/apk/release/wear-release.apk"))
+    into(wearAssets)
+    rename { "syndesia-wear.apk" }
+}
+android.sourceSets.getByName("main").assets.srcDir(wearAssets)
+tasks.named("preBuild") { dependsOn(embedWearApk) }
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }.configureEach { dependsOn(embedWearApk) }
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
@@ -89,4 +101,8 @@ dependencies {
     implementation("org.conscrypt:conscrypt-android:2.5.3")
     // Builds the self-signed certificate that identifies this phone to the watch.
     implementation("org.bouncycastle:bcpkix-jdk15to18:1.81")
+
+    // Bluetooth messages to the watch helper (wake its Wi-Fi).
+    implementation("com.google.android.gms:play-services-wearable:19.0.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 }

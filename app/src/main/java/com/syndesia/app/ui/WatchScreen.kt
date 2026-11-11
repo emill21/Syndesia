@@ -215,6 +215,7 @@ private fun WatchHero(st: SyndesiaState, link: Link, stats: WatchStats?) {
                         }
                         OutlinedButton(onClick = { st.connectRequest = AddressRequest(link.host, "") }) { Text("Other port") }
                     }
+                    if (st.helperNearby) WakeButton(st)
                 }
                 Link.Idle -> {
                     Text("No watch connected", style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
@@ -230,9 +231,18 @@ private fun WatchHero(st: SyndesiaState, link: Link, stats: WatchStats?) {
                         }
                         OutlinedButton(onClick = { st.connectRequest = AddressRequest() }) { Text("Enter address") }
                     }
+                    if (st.helperNearby && st.saved.isNotEmpty()) WakeButton(st)
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun WakeButton(st: SyndesiaState) {
+    Spacer(Modifier.height(6.dp))
+    androidx.compose.material3.TextButton(onClick = { st.wakeWatch() }) {
+        Icon(Icons.Rounded.Wifi, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Wake watch Wi-Fi over Bluetooth")
     }
 }
 

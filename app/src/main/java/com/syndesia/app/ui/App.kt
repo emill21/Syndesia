@@ -82,6 +82,7 @@ import com.syndesia.app.adb.Adb
 import com.syndesia.app.adb.Apk
 import com.syndesia.app.adb.Discovery
 import com.syndesia.app.adb.Found
+import com.syndesia.app.adb.Helper
 import com.syndesia.app.adb.InstallOptions
 import com.syndesia.app.adb.Installer
 import com.syndesia.app.adb.Link
@@ -124,6 +125,9 @@ class SyndesiaState(private val ctx: Context) {
     var pairError by mutableStateOf<String?>(null)
     var notice by mutableStateOf<String?>(null)
 
+    /** Syndesia's watch helper is reachable over Bluetooth. */
+    var helperNearby by mutableStateOf(false)
+
     var filesPath by mutableStateOf(STORAGE_ROOT)
     var preparing by mutableStateOf(false)
     var problems by mutableStateOf<List<String>>(emptyList())
@@ -134,6 +138,7 @@ class SyndesiaState(private val ctx: Context) {
 
     init {
         Installer.options = InstallOptions(allowDowngrade, grantPermissions)
+        Adb.onReconnecting = { Helper.wakeAsync(ctx, force = true) }
         Adb.onLost = { host, _ ->
             scope.launch {
                 hunting = saved.firstOrNull { it.host == host }
@@ -166,6 +171,8 @@ class SyndesiaState(private val ctx: Context) {
                 hunting = null
                 if (Installer.items.value.any { it.status == com.syndesia.app.adb.InstallStatus.Queued }) Installer.start()
             }.onFailure {
+                // Maybe the watch's Wi-Fi is asleep: ask the helper (over Bluetooth) to wake it.
+                if (!Adb.userDisconnected) Helper.wakeAsync(ctx)
                 // Port probably changed: keep an eye on mDNS for this watch's new port.
                 saved.firstOrNull { it.host == host }?.let { hunting = it }
             }
@@ -177,12 +184,26 @@ class SyndesiaState(private val ctx: Context) {
         Adb.disconnect()
     }
 
+    fun refreshHelper() {
+        scope.launch { helperNearby = Helper.nodes(ctx).isNotEmpty() }
+    }
+
+    /** Manual "wake the watch's Wi-Fi" from the Watch tab. */
+    fun wakeWatch() {
+        scope.launch {
+            val n = Helper.wake(ctx)
+            notice = if (n > 0) "Asked your watch to turn on Wi-Fi and Wireless debugging. It should show up under On this Wi-Fi in a few seconds."
+            else "Couldn't reach Syndesia on your watch over Bluetooth. Make sure the watch is connected to this phone and the helper is installed (Install tab)."
+        }
+    }
+
     /** First launch / resume: reconnect to the last watch. */
     fun autoStart() {
         if (!autoConnect || Adb.userDisconnected) return
         val l = Adb.link.value
         if (l !is Link.Idle) return
         val last = saved.firstOrNull() ?: return
+        Helper.wakeAsync(ctx)
         if ("${last.host}:${last.port}" in tried) { hunting = last; return }
         doConnect(last.host, last.port)
     }
@@ -277,6 +298,7 @@ fun SyndesiaApp(onReplayTour: () -> Unit) {
 
     LifecycleResumeEffect(Unit) {
         Discovery.start(ctx)
+        st.refreshHelper()
         st.autoStart()
         onPauseOrDispose { Discovery.stop() }
     }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3 — 2026-11-11 · Watch helper
+
+- New: Syndesia for your watch. Install it from the Install tab with one tap; it's bundled inside the phone app
+- When Syndesia can't reach the watch, it asks the watch over Bluetooth to turn on Wi-Fi and Wireless debugging, then connects by itself
+- Keeps the watch's Wi-Fi up while you're connected, and lets it go again when you disconnect
+- Wake watch Wi-Fi button on the Watch tab when it isn't connected
+
 ## 1.2 — 2026-11-11 · Disconnect fixed
 
 - Disconnect works again, in the app and on the notification, even if the watch has stopped answering

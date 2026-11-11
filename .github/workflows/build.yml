@@ -22,7 +22,7 @@ jobs:
           chmod +x gradlew
           ./gradlew :app:assembleRelease --stacktrace
           mv app/build/outputs/apk/release/app-release.apk Syndesia.apk
-          echo "VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)" >> "$GITHUB_ENV"
+          echo "VERSION=$(grep -oP '^syndesiaVersionName=\K.+' gradle.properties)" >> "$GITHUB_ENV"
       - name: Release notes
         run: |
           jq -r '.[0] | "## \(.title)\n\n" + (.items | map("- " + .) | join("\n"))' app/src/main/assets/changelog.json > notes.md

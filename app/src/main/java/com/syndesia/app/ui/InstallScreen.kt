@@ -60,6 +60,16 @@ import com.syndesia.app.adb.Installer
 import com.syndesia.app.adb.Link
 import com.syndesia.app.adb.Watch
 import kotlinx.coroutines.launch
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import com.syndesia.app.BuildConfig
+import com.syndesia.app.adb.Apk
+import com.syndesia.app.adb.Helper
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun InstallScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: (STab) -> Unit) {
@@ -81,6 +91,7 @@ fun InstallScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: 
                 onConnect = { onTab(STab.Watch) },
             )
         }
+        animatedItem(1) { HelperCard(st, link) }
         if (st.problems.isNotEmpty()) {
             item {
                 SectionCard(container = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)) {
@@ -264,5 +275,78 @@ private fun InstallRow(st: SyndesiaState, item: InstallItem, connected: Boolean)
                 }
             }
         }
+    }
+}
+
+/** Install (or update) Syndesia's own watch helper, bundled inside this app. */
+@Composable
+private fun HelperCard(st: SyndesiaState, link: Link) {
+    val colors = MaterialTheme.colorScheme
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val items by Installer.items.collectAsStateWithLifecycle()
+    val installedCount by Installer.installed.collectAsStateWithLifecycle()
+    val info = (link as? Link.Connected)?.info
+    var onWatch by remember { mutableStateOf<Long?>(null) }
+    var checked by remember { mutableStateOf(false) }
+    LaunchedEffect(info, installedCount) {
+        checked = false
+        onWatch = null
+        if (info != null) {
+            onWatch = runCatching { Helper.installedVersion() }.getOrNull()
+            checked = true
+        }
+    }
+    val bundled = BuildConfig.VERSION_CODE.toLong()
+    val busy = items.any { it.pkg.packageName == Helper.PACKAGE && (it.status == InstallStatus.Queued || it.status is InstallStatus.Sending || it.status == InstallStatus.Installing) }
+    val upToDate = onWatch != null && onWatch!! >= bundled
+    SectionCard {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconBadge(Icons.Rounded.Watch, colors.primary, 48.dp)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Syndesia for your watch", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    when {
+                        info == null -> "Wakes the watch's Wi-Fi over Bluetooth when Syndesia can't reach it, and turns Wireless debugging back on."
+                        !checked -> "Checking the watch…"
+                        onWatch == null -> "Not on this watch yet. Wakes its Wi-Fi over Bluetooth and turns Wireless debugging back on."
+                        upToDate -> "Installed and set up. Syndesia wakes your watch's Wi-Fi when it needs to."
+                        else -> "An update is ready for the watch helper."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (upToDate) Pill("Installed", Icons.Rounded.CheckCircle, colors.primaryContainer, colors.onPrimaryContainer)
+            Spacer(Modifier.weight(1f))
+            val label = when {
+                onWatch == null -> "Install on watch"
+                upToDate -> "Reinstall"
+                else -> "Update"
+            }
+            val action: () -> Unit = {
+                scope.launch {
+                    val pkg = withContext(Dispatchers.IO) { Helper.bundledApk(ctx)?.let { Apk.fromFile(ctx, it) } }
+                    if (pkg == null) ctx.toast("The watch helper isn't included in this build")
+                    else { Installer.add(listOf(pkg.copy(label = "Syndesia for Wear OS"))); Installer.start() }
+                }
+            }
+            if (upToDate) OutlinedButton(onClick = action, enabled = info != null && !busy) { Text(label) }
+            else Button(onClick = action, enabled = info != null && !busy) {
+                if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = colors.onPrimary)
+                else Icon(Icons.Rounded.Upload, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(label)
+            }
+        }
+        if (info == null) Text(
+            "Connect over Wi-Fi once to install it.",
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+        )
     }
 }

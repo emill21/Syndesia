@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Syndesia "Link orb": a signal ring flowing into a glass orb that holds a watch receiving a download. -->
+    <path android:pathData="M23,54a31,31 0,1 0,62 0a31,31 0,1 0,-62 0z" android:strokeColor="#FFC9C8FF" android:strokeAlpha="0.22" android:strokeWidth="3" />
+    <path android:pathData="M69.50,27.15 A31,31 0,0 1,82.86,42.67" android:strokeColor="#FFC9C8FF" android:strokeAlpha="0.19" android:strokeWidth="3.6" android:strokeLineCap="round" />
+    <path android:pathData="M82.86,42.67 A31,31 0,0 1,83.62,63.14" android:strokeColor="#FFC9C8FF" android:strokeAlpha="0.26" android:strokeWidth="3.6" android:strokeLineCap="round" />
+    <path android:pathData="M83.62,63.14 A31,31 0,0 1,71.46,79.61" android:strokeColor="#FFC9C8FF" android:strokeAlpha="0.37" android:strokeWidth="3.6" android:strokeLineCap="round" />
+    <path android:pathData="M71.46,79.61 A31,31 0,0 1,51.68,84.91" android:strokeColor="#FFC9C8FF" android:strokeAlpha="0.50" android:strokeWidth="3.6" android:strokeLineCap="round" />
+    <path android:pathData="M51.68,84.91 A31,31 0,0 1,32.91,76.72" android:strokeColor="#FFC9C8FF" android:strokeAlpha="0.65" android:strokeWidth="3.6" android:strokeLineCap="round" />
+    <path android:pathData="M32.91,76.72 A31,31 0,0 1,23.35,58.62" android:strokeColor="#FFC9C8FF" android:strokeAlpha="0.81" android:strokeWidth="3.6" android:strokeLineCap="round" />
+    <path android:pathData="M23.35,58.62 A31,31 0,0 1,27.15,38.50" android:strokeColor="#FFC9C8FF" android:strokeAlpha="1.00" android:strokeWidth="3.6" android:strokeLineCap="round" />
+    <path android:pathData="M23.75,38.50a3.4,3.4 0,1 0,6.8 0a3.4,3.4 0,1 0,-6.8 0z" android:fillColor="#FFC9C8FF" />
+    <!-- Glass -->
+    <path android:pathData="M28,54a26,26 0,1 0,52 0a26,26 0,1 0,-52 0z" android:fillColor="#FFFFFFFF" android:fillAlpha="0.08" />
+    <group>
+        <clip-path android:pathData="M28,54a26,26 0,1 0,52 0a26,26 0,1 0,-52 0z" />
+        <path android:pathData="M16,62 C30,56 40,56 50,61 C60,66 70,66 92,59 V92 H16 Z" android:fillColor="#FFC9C8FF" android:fillAlpha="0.40" />
+        <path android:pathData="M16,61 C32,67 42,67 54,61 C66,55 76,55 92,62 V92 H16 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="54" android:startY="55" android:endX="54" android:endY="82"
+                    android:startColor="#FFDCDBFF" android:endColor="#FF8E8CF5" />
+            </aapt:attr>
+        </path>
+        <path android:pathData="M28,54a26,26 0,1 0,52 0a26,26 0,1 0,-52 0z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="radial" android:centerX="44" android:centerY="44" android:gradientRadius="22"
+                    android:startColor="#38FFFFFF" android:endColor="#00FFFFFF" />
+            </aapt:attr>
+        </path>
+    </group>
+    <!-- Watch: straps, crown, round face -->
+    <path android:pathData="M48.5,31h11a2,2 0 0 1 2,2v42a2,2 0 0 1 -2,2h-11a2,2 0 0 1 -2,-2v-42a2,2 0 0 1 2,-2z" android:fillColor="#FF1C1D5C" />
+    <path android:pathData="M66,50.5h1.6a1.4,1.4 0 0 1 1.4,1.4v4.2a1.4,1.4 0 0 1 -1.4,1.4h-1.6z" android:fillColor="#FF1C1D5C" />
+    <path android:pathData="M40,54a14,14 0,1 0,28 0a14,14 0,1 0,-28 0z" android:fillColor="#FF1C1D5C" />
+    <path android:pathData="M43.5,54a10.5,10.5 0,1 0,21 0a10.5,10.5 0,1 0,-21 0z" android:strokeColor="#FFC9C8FF" android:strokeAlpha="0.35" android:strokeWidth="1.2" />
+    <!-- Download arrow on the face -->
+    <path android:pathData="M54,47.5V59.5 M49,54.8 L54,59.8 L59,54.8" android:strokeColor="#FFC9C8FF" android:strokeWidth="2.6" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

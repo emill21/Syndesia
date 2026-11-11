@@ -12,6 +12,13 @@ Syndesia talks to the watch over **Wireless debugging** (ADB over Wi-Fi), the sa
 - **Dashboard**: battery, storage, memory, uptime, screenshots (save or share), and a command box for `adb shell` commands.
 - Same Material You look as Bataria and Katharia: wallpaper colours, accent presets, animated backgrounds, pure black, welcome tour, in-app changelog.
 
+## Watch helper
+Syndesia carries a small Wear OS app inside it. Install it from the **Install** tab (one tap, over Wi-Fi). After that, when Syndesia can't reach the watch, it sends a message over Bluetooth and the helper:
+- asks Wear OS for Wi-Fi, which joins a saved network even while Bluetooth is connected, and holds it while you're connected;
+- switches **Wireless debugging** back on (Syndesia grants it `WRITE_SECURE_SETTINGS` over ADB during setup).
+
+The watch's Wi-Fi setting must be On or Automatic, and the network must be one the watch has joined before.
+
 ## Install
 Grab `Syndesia.apk` from the latest [release](../../releases). Every build is signed with the same key (`keystore/`), so updates install over the previous version and keep your paired watches.
 

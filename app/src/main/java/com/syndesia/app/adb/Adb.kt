@@ -80,6 +80,9 @@ object Adb {
     private val connectLock = Mutex()
     private var watchdog: Job? = null
 
+    /** Called when an automatic reconnect starts (the app uses it to wake the watch's Wi-Fi over Bluetooth). */
+    var onReconnecting: (() -> Unit)? = null
+
     /** Called when the link drops for good (reconnecting gave up), so the app can look for the watch again. */
     var onLost: ((host: String, port: Int) -> Unit)? = null
 
@@ -263,6 +266,7 @@ object Adb {
             val deadline = System.currentTimeMillis() + 120_000
             var attempt = 0
             _link.value = Link.Connecting(info.host, info.port, reconnecting = true)
+            runCatching { onReconnecting?.invoke() }
             while (isActive && wanted && !userDisconnected && System.currentTimeMillis() < deadline) {
                 val f = Discovery.found.value.firstOrNull {
                     it.host == info.host || (info.serial.isNotBlank() && it.serial == info.serial)

@@ -15,7 +15,9 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.syndesia.app.adb.Adb
+import com.syndesia.app.adb.Helper
 import com.syndesia.app.adb.Link
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -46,11 +48,22 @@ class LinkService : Service() {
         if (!started) {
             started = true
             holdWifi()
+            // Remind the watch helper every few minutes so it keeps Wi-Fi up while we're connected.
+            scope.launch {
+                while (true) {
+                    if (Adb.link.value is Link.Connected) Helper.wakeAsync(applicationContext, force = true)
+                    delay(5 * 60_000L)
+                }
+            }
             scope.launch {
                 Adb.link.collectLatest { l ->
                     when (l) {
                         is Link.Connected, is Link.Connecting -> promote(l)
-                        else -> stop()
+                        else -> {
+                            // User disconnected: let the watch drop Wi-Fi again.
+                            if (Adb.userDisconnected) Helper.releaseAsync(applicationContext)
+                            stop()
+                        }
                     }
                 }
             }

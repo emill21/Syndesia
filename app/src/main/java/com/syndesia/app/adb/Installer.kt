@@ -79,6 +79,10 @@ object Installer {
                         finishedAt = System.currentTimeMillis(),
                     )
                 }
+                if (result.isSuccess && next.pkg.packageName == Helper.PACKAGE) {
+                    // The watch helper: grant its permissions and start it once.
+                    runCatching { Helper.setUp() }
+                }
                 if (result.isSuccess) _installed.value++
             }
         }
