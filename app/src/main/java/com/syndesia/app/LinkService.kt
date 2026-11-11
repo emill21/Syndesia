@@ -156,8 +156,8 @@ class LinkService : Service() {
         private const val ACTION_DISCONNECT = "com.syndesia.app.DISCONNECT"
 
         /** Call when a link comes up (app is in the foreground then, so the service may start). */
-        fun start(context: Context) {
-            runCatching { ContextCompat.startForegroundService(context, Intent(context, LinkService::class.java)) }
-        }
+        /** False if Android refused (e.g. started from the background). */
+        fun start(context: Context): Boolean =
+            runCatching { ContextCompat.startForegroundService(context, Intent(context, LinkService::class.java)) }.isSuccess
     }
 }

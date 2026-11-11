@@ -196,6 +196,42 @@ object Transfers {
         }
     }
 
+    /**
+     * A file the watch is sending us over Bluetooth: saved into Downloads/Syndesia/From watch,
+     * shown in the transfer list. Returns where it went.
+     */
+    fun receiveFromWatch(context: Context, name: String, size: Long, input: java.io.InputStream): Pair<Uri, String> {
+        val app = context.applicationContext
+        val t = Transfer(nextId++, name, Direction.ToPhone, size, state = Transfer.State.Running, viaBluetooth = true)
+        add(t)
+        var created: Uri? = null
+        try {
+            val (uri, out, where) = openDownload(app, name, "From watch")
+            created = uri
+            var got = 0L
+            var last = 0L
+            out.use { o ->
+                val buf = ByteArray(64 * 1024)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    o.write(buf, 0, n)
+                    got += n
+                    val now = System.currentTimeMillis()
+                    if (now - last > 200) { last = now; val g = got; set(t.id) { it.copy(done = g) } }
+                }
+            }
+            if (size >= 0 && got != size) throw java.io.IOException("Only part of $name arrived")
+            finishDownload(app, uri)
+            set(t.id) { it.copy(state = Transfer.State.Done, done = got, result = uri, where = where) }
+            return uri to where
+        } catch (e: Throwable) {
+            created?.let { u -> runCatching { app.contentResolver.delete(u, null, null) } }
+            set(t.id) { it.copy(state = Transfer.State.Failed, error = e.message ?: "Failed") }
+            throw e
+        }
+    }
+
     /** Save a phone-side bitmap/bytes (e.g. a screenshot) into Downloads/Syndesia. */
     fun saveBytes(context: Context, name: String, bytes: ByteArray, subfolder: String? = null): Pair<Uri, String> {
         val (uri, out, where) = openDownload(context.applicationContext, name, subfolder)

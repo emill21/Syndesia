@@ -86,11 +86,22 @@ object Receiver {
             val id = h.getString("id")
             val name = h.optString("name", "file").replace('/', '_').ifBlank { "file" }
             val size = h.optLong("size", -1)
+            WatchTransfers.add(WTransfer(id, name, toPhone = false, total = size))
+            var last = 0L
+            val progress: (Long) -> Unit = { got ->
+                val now = System.currentTimeMillis()
+                if (now - last > 200) { last = now; WatchTransfers.set(id) { it.copy(done = got) } }
+            }
             when (h.optString("kind")) {
                 "file" -> {
-                    val r = runCatching { saveShared(ctx, inp, name, h.optString("mime").ifBlank { null }, size) }
-                    r.onSuccess { where -> result(ctx, node, id, "saved", where) }
-                        .onFailure { e -> result(ctx, node, id, "failed", e.message ?: "Couldn't save $name") }
+                    val r = runCatching { saveShared(ctx, inp, name, h.optString("mime").ifBlank { null }, size, progress) }
+                    r.onSuccess { where ->
+                        WatchTransfers.set(id) { it.copy(state = WTransfer.State.Done, done = it.total, message = "Saved to $where") }
+                        result(ctx, node, id, "saved", where)
+                    }.onFailure { e ->
+                        WatchTransfers.set(id) { it.copy(state = WTransfer.State.Failed, message = e.message) }
+                        result(ctx, node, id, "failed", e.message ?: "Couldn't save $name")
+                    }
                 }
                 "apk" -> {
                     val install = h.getString("install")
@@ -98,11 +109,13 @@ object Receiver {
                     val count = h.optInt("count", 1)
                     val dir = File(ctx.cacheDir, "bt/$install").apply { mkdirs() }
                     val f = File(dir, "${index}_" + name.replace(Regex("[^A-Za-z0-9._-]"), "_"))
-                    val got = f.outputStream().use { copy(inp, it) }
+                    val got = f.outputStream().use { copy(inp, it, progress) }
                     if (size >= 0 && got != size) {
+                        WatchTransfers.set(id) { it.copy(state = WTransfer.State.Failed, message = "Only part of it arrived") }
                         result(ctx, node, id, "failed", "Only part of the file arrived")
                         return
                     }
+                    WatchTransfers.set(id) { it.copy(state = WTransfer.State.Done, done = it.total, message = "Received, installing") }
                     result(ctx, node, id, "received")
                     val ready = synchronized(parts) {
                         val m = parts.getOrPut(install) { mutableMapOf() }
@@ -116,7 +129,7 @@ object Receiver {
         }
     }
 
-    private fun copy(input: java.io.InputStream, out: java.io.OutputStream): Long {
+    private fun copy(input: java.io.InputStream, out: java.io.OutputStream, progress: (Long) -> Unit = {}): Long {
         val buf = ByteArray(64 * 1024)
         var total = 0L
         while (true) {
@@ -124,12 +137,13 @@ object Receiver {
             if (n < 0) break
             out.write(buf, 0, n)
             total += n
+            progress(total)
         }
         return total
     }
 
     /** Save into shared storage by type, e.g. Music/Syndesia/song.mp3. Returns where it went. */
-    private fun saveShared(ctx: Context, input: java.io.InputStream, name: String, mime: String?, size: Long): String {
+    private fun saveShared(ctx: Context, input: java.io.InputStream, name: String, mime: String?, size: Long, progress: (Long) -> Unit): String {
         val type = mime ?: android.webkit.MimeTypeMap.getSingleton()
             .getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase()) ?: "application/octet-stream"
         val (collection: Uri, dir: String) = when {
@@ -147,7 +161,7 @@ object Receiver {
         val cr = ctx.contentResolver
         val uri = cr.insert(collection, values) ?: throw IOException("The watch's storage refused $name")
         try {
-            val got = (cr.openOutputStream(uri) ?: throw IOException("Couldn't write $name")).use { copy(input, it) }
+            val got = (cr.openOutputStream(uri) ?: throw IOException("Couldn't write $name")).use { copy(input, it, progress) }
             if (size >= 0 && got != size) throw IOException("Only part of $name arrived")
             cr.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
         } catch (e: Throwable) {

@@ -1,5 +1,18 @@
 [
   {
+    "version": "1.6",
+    "date": "2026-11-11",
+    "title": "A better watch app",
+    "items": [
+      "Watch app redesigned with Material 3 Expressive for Wear OS",
+      "Send files from the watch to the phone over Bluetooth: tap Send to phone on the watch, pick a file, and it lands in Downloads/Syndesia/From watch",
+      "Connect to phone, from the watch: it turns on its Wi-Fi and Wireless debugging and asks the phone to link up",
+      "Screenshot from the watch: tap it, and 5 seconds later the phone saves a screenshot of whatever's on the watch",
+      "Live transfer progress on the watch, both directions",
+      "Update the watch helper from the Install tab to get all of this"
+    ]
+  },
+  {
     "version": "1.5",
     "date": "2026-11-11",
     "title": "Record, preview, save folders",

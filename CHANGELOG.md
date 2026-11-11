@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6 — 2026-11-11 · A better watch app
+
+- Watch app redesigned with Material 3 Expressive for Wear OS
+- Send files from the watch to the phone over Bluetooth: tap Send to phone on the watch, pick a file, and it lands in Downloads/Syndesia/From watch
+- Connect to phone, from the watch: it turns on its Wi-Fi and Wireless debugging and asks the phone to link up
+- Screenshot from the watch: tap it, and 5 seconds later the phone saves a screenshot of whatever's on the watch
+- Live transfer progress on the watch, both directions
+- Update the watch helper from the Install tab to get all of this
+
 ## 1.5 — 2026-11-11 · Record, preview, save folders
 
 - Install queue memory: your queue survives closing the app, and an install cut off by a dropped connection picks up again by itself when the watch is back

@@ -68,6 +68,20 @@
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
 
+        <!-- Requests from Syndesia on the watch (connect, screenshot, files sent to the phone). -->
+        <service
+            android:name=".PhoneListener"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/syndesia" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.CHANNEL_EVENT" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/syndesia" />
+            </intent-filter>
+        </service>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files"

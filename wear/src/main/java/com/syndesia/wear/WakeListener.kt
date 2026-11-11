@@ -10,6 +10,7 @@ class WakeListener : WearableListenerService() {
         when (event.path) {
             PATH_WAKE -> WifiKeeper.start(this)
             PATH_RELEASE -> WifiHold.release(this)
+            Phone.PATH_REPLY -> Phone.onReply(event.data)
         }
     }
 

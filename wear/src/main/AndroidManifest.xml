@@ -13,6 +13,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Browse the watch's storage to send files to the phone (granted by the phone over ADB at setup). -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
     <!-- Installs APKs sent over Bluetooth (the watch asks you to confirm each one). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Granted once by the phone over ADB (pm grant), so the helper can switch Wireless debugging back on. -->
@@ -39,6 +43,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".FilesActivity"
+            android:exported="false"
+            android:taskAffinity="" />
 
         <!-- Messages from Syndesia on the phone, over Bluetooth. -->
         <service

@@ -191,6 +191,8 @@ object Helper {
         Adb.sh("cmd appops set $PACKAGE RUN_ANY_IN_BACKGROUND allow")
         // Allow installs sent over Bluetooth (the watch still asks to confirm each one).
         Adb.sh("cmd appops set $PACKAGE REQUEST_INSTALL_PACKAGES allow")
+        // Let it browse the watch's storage to send files to the phone.
+        Adb.sh("cmd appops set --uid $PACKAGE MANAGE_EXTERNAL_STORAGE allow")
         runCatching { Watch.launch(PACKAGE) }
         return grant.trim().ifBlank { null }?.takeIf { it.contains("Exception", true) || it.contains("Error", true) }
     }
