@@ -83,6 +83,7 @@ import com.syndesia.app.adb.Apk
 import com.syndesia.app.adb.Discovery
 import com.syndesia.app.adb.Found
 import com.syndesia.app.adb.Helper
+import com.syndesia.app.adb.Hotspot
 import com.syndesia.app.adb.InstallOptions
 import com.syndesia.app.adb.Installer
 import com.syndesia.app.adb.Link
@@ -124,6 +125,9 @@ class SyndesiaState(private val ctx: Context) {
     var pairing by mutableStateOf(false)
     var pairError by mutableStateOf<String?>(null)
     var notice by mutableStateOf<String?>(null)
+
+    /** Progress text while connecting through the phone's hotspot (null when not doing that). */
+    var hotspotStage by mutableStateOf<String?>(null)
 
     /** Syndesia's watch helper is reachable over Bluetooth. */
     var helperNearby by mutableStateOf(false)
@@ -184,6 +188,84 @@ class SyndesiaState(private val ctx: Context) {
     fun disconnect() {
         hunting = null
         Adb.disconnect()
+        Hotspot.stop()
+    }
+
+    /**
+     * Switch the watch's ADB to the classic port 5555 (like `adb tcpip 5555`). That mode doesn't ask
+     * "Allow wireless debugging on this network?", so hotspot connections go straight through.
+     * Lasts until the watch restarts.
+     */
+    fun enableClassicPort() {
+        val info = Adb.connected ?: return
+        scope.launch {
+            hotspotStage = "Switching the watch to port 5555…"
+            runCatching { Adb.service("tcpip:5555") }
+            // adbd restarts on the watch; give it a moment, then reconnect on the new port.
+            delay(3000)
+            hotspotStage = null
+            tried.clear()
+            hunting = null
+            val r = Adb.connect(ctx, info.host, 5555)
+            val now = r.getOrNull()
+            if (now != null) {
+                prefs.remember(SavedWatch(info.host, 5555, now.model, now.serial, System.currentTimeMillis()))
+                saved = prefs.watches
+                notice = "Done. Until ${now.model} restarts, Syndesia connects on port 5555 and the watch won't ask about each new network, including your phone's hotspot."
+            } else {
+                notice = "The watch switched modes but Syndesia couldn't reconnect on port 5555. If the watch asks \"Allow debugging?\", tap Always allow, then connect again."
+            }
+        }
+    }
+
+    /**
+     * No Wi-Fi in common? Start the phone's own hotspot, have the watch join it over Bluetooth,
+     * then connect ADB over it.
+     */
+    fun connectViaHotspot() {
+        if (hotspotStage != null) return
+        scope.launch {
+            var ok = false
+            try {
+                hotspotStage = "Starting your phone's hotspot…"
+                val creds = Hotspot.start(ctx)
+                hotspotStage = "Asking your watch to join it…"
+                val addr = Helper.joinHotspot(ctx, creds) { stage ->
+                    if (stage == "joining") hotspotStage = "Your watch is joining ${creds.ssid}…"
+                }
+                val ip = addr.substringBefore(':')
+                val reported = addr.substringAfter(':', "").toIntOrNull()
+                hotspotStage = "Connecting over the hotspot…"
+                Discovery.restart(ctx)
+                val viaMdns = withTimeoutOrNull(8000) {
+                    var p: Int? = null
+                    while (p == null) {
+                        p = Discovery.found.value.firstOrNull { it.host == ip }?.connectPort
+                        if (p == null) delay(300)
+                    }
+                    p
+                }
+                // Wireless debugging's port (from the watch or mDNS), then the classic port 5555.
+                val ports = listOfNotNull(reported, viaMdns, 5555).distinct()
+                for (p in ports) {
+                    val r = Adb.connect(ctx, ip, p)
+                    val info = r.getOrNull()
+                    if (info != null) {
+                        prefs.remember(SavedWatch(ip, p, info.model, info.serial, System.currentTimeMillis()))
+                        saved = prefs.watches
+                        ok = true
+                        break
+                    }
+                    if ((Adb.link.value as? Link.Failed)?.needsPairing == true) break
+                }
+                if (!ok) notice = "Your watch joined the hotspot, but Syndesia couldn't connect yet. On the watch, make sure Wireless debugging is on, and if it asks \"Allow wireless debugging on this network?\" tap Always allow. Then try again."
+            } catch (e: Throwable) {
+                notice = e.message ?: "Couldn't connect through the hotspot"
+            } finally {
+                hotspotStage = null
+                if (!ok) Hotspot.stop()
+            }
+        }
     }
 
     fun refreshHelper() {
@@ -212,7 +294,7 @@ class SyndesiaState(private val ctx: Context) {
 
     /** mDNS saw something: if it's a saved watch we're not connected to, connect. */
     fun onFound(found: List<Found>) {
-        if (!autoConnect || Adb.userDisconnected) return
+        if (!autoConnect || Adb.userDisconnected || hotspotStage != null) return
         val l = Adb.link.value
         if (l is Link.Connected || l is Link.Connecting) return
         if (l is Link.Failed && l.needsPairing) return

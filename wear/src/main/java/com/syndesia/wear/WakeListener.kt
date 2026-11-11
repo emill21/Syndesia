@@ -11,6 +11,8 @@ class WakeListener : WearableListenerService() {
             PATH_WAKE -> WifiKeeper.start(this)
             PATH_RELEASE -> WifiHold.release(this)
             Phone.PATH_REPLY -> Phone.onReply(event.data)
+            PATH_HOTSPOT -> runCatching { org.json.JSONObject(String(event.data, Charsets.UTF_8)) }
+                .getOrNull()?.let { HotspotJoin.join(this, event.sourceNodeId, it) }
         }
     }
 
@@ -21,5 +23,6 @@ class WakeListener : WearableListenerService() {
     companion object {
         const val PATH_WAKE = "/syndesia/wake"
         const val PATH_RELEASE = "/syndesia/release"
+        const val PATH_HOTSPOT = "/syndesia/hotspot"
     }
 }

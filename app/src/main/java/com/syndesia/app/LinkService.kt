@@ -16,6 +16,7 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.syndesia.app.adb.Adb
 import com.syndesia.app.adb.Helper
+import com.syndesia.app.adb.Hotspot
 import com.syndesia.app.adb.Link
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
@@ -62,6 +63,8 @@ class LinkService : Service() {
                         else -> {
                             // User disconnected: let the watch drop Wi-Fi again.
                             if (Adb.userDisconnected) Helper.releaseAsync(applicationContext)
+                            // No link any more: don't leave the phone's hotspot running.
+                            Hotspot.stop()
                             stop()
                         }
                     }
@@ -74,6 +77,7 @@ class LinkService : Service() {
     /** Swiped away from Recents = "closed completely": drop the link and go. */
     override fun onTaskRemoved(rootIntent: Intent?) {
         Adb.disconnect()
+        Hotspot.stop()
         stop()
         super.onTaskRemoved(rootIntent)
     }

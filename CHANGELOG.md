@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7 — 2026-11-11 · Phone hotspot
+
+- Connect via phone hotspot: one tap starts a private hotspot on your phone, your watch joins it over Bluetooth, and Syndesia connects over it. Works anywhere, no router needed
+- The hotspot turns itself off when you disconnect or close Syndesia
+- Skip the network prompt: while connected, switch the watch to port 5555 until it restarts so it doesn't ask about each new network
+- Update the watch app from the Install tab (over Wi-Fi) to get hotspot joining
+
 ## 1.6.1 — 2026-11-11 · Bluetooth fix
 
 - Fixed: the phone couldn't find Syndesia on the watch over Bluetooth, so Bluetooth sending, installing and waking the watch's Wi-Fi never kicked in. Just updating the phone app makes it work with the watch app you already have

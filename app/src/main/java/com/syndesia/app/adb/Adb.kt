@@ -335,6 +335,18 @@ object Adb {
         }
     }
 
+    /** Talk to a non-shell ADB service (e.g. `tcpip:5555`) and return its reply. */
+    suspend fun service(destination: String): String = withContext(Dispatchers.IO) {
+        val s = open(destination)
+        try {
+            String(s.readAll(), Charsets.UTF_8)
+        } catch (e: IOException) {
+            "" // services like tcpip restart adbd and drop the link mid-reply
+        } finally {
+            runCatching { s.close() }
+        }
+    }
+
     /** Raw bytes from a command, e.g. `screencap -p`. */
     suspend fun execBytes(command: String): ByteArray = withContext(Dispatchers.IO) {
         val s = open("exec:$command")

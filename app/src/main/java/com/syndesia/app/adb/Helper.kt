@@ -33,6 +33,7 @@ object Helper {
     private const val CAPABILITY = "syndesia_helper"
     private const val PATH_WAKE = "/syndesia/wake"
     private const val PATH_RELEASE = "/syndesia/release"
+    private const val PATH_HOTSPOT = "/syndesia/hotspot"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -171,6 +172,31 @@ object Helper {
         }
     }
 
+    /**
+     * Ask the watch to join the phone's hotspot. Returns the watch's "ip" or "ip:port" on success.
+     * Stages from the watch: joining → joined (message = ip[:port]) or failed.
+     */
+    suspend fun joinHotspot(context: Context, creds: Hotspot.Credentials, onStage: (String) -> Unit): String {
+        val node = bestNode(context) ?: throw IOException("Can't reach Syndesia on your watch over Bluetooth. Is the watch connected to this phone?")
+        val id = "h${System.currentTimeMillis()}"
+        val replies = expect(id)
+        try {
+            val body = JSONObject().put("id", id).put("ssid", creds.ssid).put("pass", creds.passphrase).put("wpa3", creds.wpa3)
+            Wearable.getMessageClient(context.applicationContext).sendMessage(node, PATH_HOTSPOT, body.toString().toByteArray()).await()
+            val r = withTimeoutOrNull(60_000) {
+                var last: String? = null
+                replies.first { rep ->
+                    if (rep != null && rep.stage != last) { last = rep.stage; onStage(rep.stage) }
+                    rep?.stage == "joined" || rep?.stage == "failed"
+                }
+            } ?: throw IOException("The watch didn't join the hotspot in time. Update Syndesia on the watch (Install tab) and try again.")
+            if (r.stage == "failed") throw IOException(r.message ?: "The watch couldn't join the hotspot")
+            return r.message ?: throw IOException("The watch joined but didn't say its address")
+        } finally {
+            forget(id)
+        }
+    }
+
     /** The helper APK bundled with this build, copied out so it can be installed. */
     fun bundledApk(context: Context): File? = runCatching {
         val out = File(context.cacheDir, "helper").apply { mkdirs() }.let { File(it, ASSET) }
@@ -198,6 +224,8 @@ object Helper {
         Adb.sh("cmd appops set $PACKAGE REQUEST_INSTALL_PACKAGES allow")
         // Let it browse the watch's storage to send files to the phone.
         Adb.sh("cmd appops set --uid $PACKAGE MANAGE_EXTERNAL_STORAGE allow")
+        // Let it join the phone's hotspot without the "Allow suggested networks?" prompt.
+        Adb.sh("cmd wifi network-suggestions-set-user-approved $PACKAGE yes")
         runCatching { Watch.launch(PACKAGE) }
         return grant.trim().ifBlank { null }?.takeIf { it.contains("Exception", true) || it.contains("Error", true) }
     }

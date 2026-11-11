@@ -1,6 +1,12 @@
 package com.syndesia.app.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -56,6 +62,7 @@ import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.Thermostat
 import androidx.compose.material.icons.rounded.Watch
 import androidx.compose.material.icons.rounded.Wifi
+import androidx.compose.material.icons.rounded.WifiTethering
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
@@ -93,6 +100,7 @@ import com.syndesia.app.SavedWatch
 import com.syndesia.app.adb.Adb
 import com.syndesia.app.adb.Discovery
 import com.syndesia.app.adb.Found
+import com.syndesia.app.adb.Hotspot
 import com.syndesia.app.adb.Link
 import com.syndesia.app.adb.Recorder
 import com.syndesia.app.adb.Transfers
@@ -193,6 +201,8 @@ private fun WatchHero(st: SyndesiaState, link: Link, stats: WatchStats?) {
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Pill("Connected", Icons.Rounded.Link, colors.primary, colors.onPrimary)
+                        val hs by Hotspot.creds.collectAsState()
+                        if (hs != null) Pill("Via phone hotspot", Icons.Rounded.WifiTethering, colors.secondaryContainer, colors.onSecondaryContainer)
                         if (stats?.charging == true) Pill("Charging", Icons.Rounded.Bolt, colors.tertiaryContainer, colors.onTertiaryContainer)
                     }
                 }
@@ -220,7 +230,7 @@ private fun WatchHero(st: SyndesiaState, link: Link, stats: WatchStats?) {
                         }
                         OutlinedButton(onClick = { st.connectRequest = AddressRequest(link.host, "") }) { Text("Other port") }
                     }
-                    if (st.helperNearby) WakeButton(st)
+                    if (st.helperNearby) { HotspotButton(st); WakeButton(st) }
                 }
                 Link.Idle -> {
                     Text("No watch connected", style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
@@ -236,9 +246,39 @@ private fun WatchHero(st: SyndesiaState, link: Link, stats: WatchStats?) {
                         }
                         OutlinedButton(onClick = { st.connectRequest = AddressRequest() }) { Text("Enter address") }
                     }
+                    if (st.helperNearby) HotspotButton(st)
                     if (st.helperNearby && st.saved.isNotEmpty()) WakeButton(st)
                 }
             }
+        }
+    }
+}
+
+/** No shared Wi-Fi? Start the phone's hotspot and have the watch join it. */
+@Composable
+private fun HotspotButton(st: SyndesiaState) {
+    val ctx = LocalContext.current
+    val perms = if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.NEARBY_WIFI_DEVICES)
+    else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
+        if (res.values.all { it }) st.connectViaHotspot()
+        else st.notice = if (Build.VERSION.SDK_INT >= 33) "Syndesia needs the Nearby devices permission to start a hotspot for your watch."
+        else "Syndesia needs the Location permission to start a hotspot for your watch (Android asks for it for hotspots)."
+    }
+    Spacer(Modifier.height(10.dp))
+    val stage = st.hotspotStage
+    if (stage != null) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(10.dp))
+            Text(stage, style = MaterialTheme.typography.bodyMedium)
+        }
+    } else {
+        FilledTonalButton(onClick = {
+            val granted = perms.all { ContextCompat.checkSelfPermission(ctx, it) == PackageManager.PERMISSION_GRANTED }
+            if (granted) st.connectViaHotspot() else ask.launch(perms)
+        }) {
+            Icon(Icons.Rounded.WifiTethering, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Connect via phone hotspot")
         }
     }
 }
@@ -499,6 +539,11 @@ private fun DeviceCard(st: SyndesiaState, info: WatchInfo, stats: WatchStats?) {
         stats?.batteryTempC?.let { InfoRow("Battery temperature", String.format(Locale.US, "%.1f °C", it), icon = Icons.Rounded.Thermostat) }
         stats?.storageTotalKb?.let { t -> InfoRow("Storage", "${formatBytes((stats?.storageFreeKb ?: 0) * 1024)} free of ${formatBytes(t * 1024)}", icon = Icons.Rounded.SdStorage) }
         if (info.serial.isNotBlank()) InfoRow("Serial", info.serial, icon = Icons.Rounded.Memory)
+        if (info.port != 5555) LinkRow(
+            Icons.Rounded.WifiTethering, "Skip the network prompt",
+            "Switch the watch to port 5555 until it restarts, so connecting through your phone's hotspot (or any new Wi-Fi) doesn't ask each time.",
+        ) { st.enableClassicPort() }
+        else InfoRow("Port 5555 mode", "On until the watch restarts", icon = Icons.Rounded.WifiTethering)
         LinkRow(Icons.Rounded.RestartAlt, "Restart watch", "Reboots it. You'll need to turn Wireless debugging on again afterwards on most watches.", MaterialTheme.colorScheme.error) {
             confirmReboot = true
         }
