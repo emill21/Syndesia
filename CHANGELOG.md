@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.1 — 2026-11-11 · Smoother mouse
+
+- Smoother mouse: the cursor glides between updates instead of jumping, the watch sends movement twice as often, and acceleration ramps up gently
+- Smooth crown scrolling: one continuous finger that follows the crown and lets go without flinging, instead of separate swipes
+- Tap and hold, then drag: hold on the touchpad to press and keep holding on the phone, for long-press menus, selecting text, or dragging icons and sliders. The watch buzzes and the pad lights up while you're holding
+- Taps click straight away (two quick taps make a double tap)
+- Update both the phone app and the watch app to get this
+
 ## 1.8 — 2026-11-11 · Watch remote
 
 - Phone remote on the watch: Back, Home, Recents, notifications, Quick Settings, screenshot, lock, power menu and split screen

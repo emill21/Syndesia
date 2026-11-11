@@ -7,8 +7,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -86,7 +88,6 @@ import androidx.wear.compose.material3.ScreenScaffold
 import androidx.wear.compose.material3.Text
 import kotlinx.coroutines.delay
 import org.json.JSONObject
-import kotlin.math.abs
 
 /** Base for remote screens: listen for the phone's replies while visible. */
 abstract class RemoteScreenActivity : ComponentActivity() {
@@ -232,25 +233,27 @@ class MouseActivity : RemoteScreenActivity() {
 private fun Touchpad(onClose: () -> Unit) {
     val ctx = LocalContext.current
     val colors = MaterialTheme.colorScheme
+    val haptics = LocalHapticFeedback.current
     var padW by remember { mutableFloatStateOf(1f) }
-    // Moves are batched and sent ~30 times a second, so Bluetooth isn't flooded.
-    val pending = remember { floatArrayOf(0f, 0f) }
-    var scrollAcc by remember { mutableFloatStateOf(0f) }
+    // Moves and crown turns are collected here and sent ~50 times a second.
+    val pending = remember { floatArrayOf(0f, 0f, 0f) } // dx, dy, wheel
     var hint by remember { mutableStateOf(true) }
+    var holding by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
         focus.requestFocus()
         while (true) {
-            delay(33)
-            val (dx, dy) = synchronized(pending) {
-                val r = pending[0] to pending[1]
-                pending[0] = 0f; pending[1] = 0f
-                r
+            delay(20)
+            val (move, wheel) = synchronized(pending) {
+                val r = Triple(pending[0], pending[1], pending[2])
+                pending[0] = 0f; pending[1] = 0f; pending[2] = 0f
+                (r.first to r.second) to r.third
             }
-            if (dx != 0f || dy != 0f) {
-                Remote.send(ctx, "move", JSONObject().put("dx", (dx / padW).toDouble()).put("dy", (dy / padW).toDouble()))
+            if (move.first != 0f || move.second != 0f) {
+                Remote.send(ctx, "move", JSONObject().put("dx", (move.first / padW).toDouble()).put("dy", (move.second / padW).toDouble()))
             }
+            if (wheel != 0f) Remote.send(ctx, "wheel", JSONObject().put("dy", (wheel / padW).toDouble()))
         }
     }
 
@@ -260,42 +263,72 @@ private fun Touchpad(onClose: () -> Unit) {
             .background(colors.background)
             .onSizeChanged { padW = it.width.toFloat().coerceAtLeast(1f) }
             .onRotaryScrollEvent { e ->
-                // Crown = scroll wheel, at the cursor.
-                scrollAcc += e.verticalScrollPixels
-                if (abs(scrollAcc) > 48f) {
-                    val dir = if (scrollAcc > 0) "down" else "up"
-                    val amount = (abs(scrollAcc) / 160f).coerceIn(0.3f, 1.5f)
-                    Remote.send(ctx, "scroll", JSONObject().put("dir", dir).put("amount", amount.toDouble()).put("atCursor", true))
-                    scrollAcc = 0f
-                }
+                // Crown = scroll wheel: one smooth, continuous scroll at the cursor.
+                synchronized(pending) { pending[2] += e.verticalScrollPixels }
+                hint = false
                 true
             }
             .focusRequester(focus)
             .focusable()
             .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = { hint = false; Remote.send(ctx, "click") },
-                    onDoubleTap = { Remote.send(ctx, "double") },
-                    onLongPress = { Remote.send(ctx, "long") },
-                )
-            }
-            .pointerInput(Unit) {
-                detectDragGestures { change, drag ->
-                    change.consume()
+                val slop = viewConfiguration.touchSlop
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
                     hint = false
-                    synchronized(pending) { pending[0] += drag.x; pending[1] += drag.y }
+                    var last = down.position
+                    var moved = false
+                    var held = false
+                    val holdAt = down.uptimeMillis + 380
+                    while (true) {
+                        // Wake up at the hold deadline even if the finger doesn't move.
+                        val event = if (!moved && !held) {
+                            withTimeoutOrNull((holdAt - android.os.SystemClock.uptimeMillis()).coerceAtLeast(1)) { awaitPointerEvent() }
+                        } else awaitPointerEvent()
+                        if (event == null) {
+                            // Still down, didn't move: press and hold on the phone (long-press, then drag).
+                            if (!moved && !held) {
+                                held = true
+                                holding = true
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                Remote.send(ctx, "press")
+                            }
+                            continue
+                        }
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed) {
+                            if (held) Remote.send(ctx, "release")
+                            else if (!moved) Remote.send(ctx, "click")
+                            holding = false
+                            break
+                        }
+                        val delta = change.position - last
+                        if (!moved && !held && (change.position - down.position).getDistance() > slop) moved = true
+                        if (moved || held) {
+                            synchronized(pending) { pending[0] += delta.x; pending[1] += delta.y }
+                            last = change.position
+                            change.consume()
+                        }
+                        if (!moved && !held && change.uptimeMillis >= holdAt) {
+                            held = true
+                            holding = true
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            Remote.send(ctx, "press")
+                        }
+                    }
                 }
             },
         contentAlignment = Alignment.Center,
     ) {
-        // Touch surface
+        // Touch surface; lights up while holding (dragging / selecting).
         Box(
-            Modifier.fillMaxSize().padding(10.dp).background(colors.surfaceContainer, CircleShape),
+            Modifier.fillMaxSize().padding(10.dp)
+                .background(if (holding) colors.primaryContainer else colors.surfaceContainer, CircleShape),
         )
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Rounded.Mouse, contentDescription = null, tint = colors.primary, modifier = Modifier.size(28.dp))
-            if (hint) Text(
-                "Drag to move\nTap to click · hold for long press\nTurn the crown to scroll",
+            if (holding) Text("Holding · drag to select or move", style = MaterialTheme.typography.bodySmall, color = colors.onPrimaryContainer)
+            else if (hint) Text(
+                "Drag to move · tap to click\nHold, then drag to select or move\nTurn the crown to scroll",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant,
                 textAlign = TextAlign.Center,
