@@ -175,12 +175,12 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
     /** Press and keep holding at the cursor (long-press to select; then moves drag). */
     private fun press() {
         if (finger.active) finger.release()
-        cursor?.pressed = true
+        cursor?.holding = true
         finger.start(cx, cy, holding = true)
     }
 
     private fun release() {
-        cursor?.pressed = false
+        cursor?.holding = false
         finger.release()
     }
 
@@ -245,7 +245,7 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
 
         private fun reset() {
             active = false; holding = false; ending = false; last = null
-            cursor?.pressed = false
+            cursor?.holding = false
         }
 
         fun start(x: Float, y: Float, holding: Boolean) {
@@ -440,7 +440,7 @@ private class CursorView(context: Context) : View(context), android.view.Choreog
     private var ty = 0f
     private var ticking = false
 
-    var pressed = false
+    var holding = false
         set(v) { field = v; invalidate() }
 
     private val arrow = Path().apply {
@@ -479,8 +479,8 @@ private class CursorView(context: Context) : View(context), android.view.Choreog
     override fun onDraw(canvas: Canvas) {
         canvas.save()
         canvas.translate(x, y)
-        if (pressed) canvas.drawCircle(0f, 0f, 30f, dot)
-        if (pressed || SystemClock.uptimeMillis() < pulseUntil) canvas.drawCircle(0f, 0f, 26f, ring)
+        if (holding) canvas.drawCircle(0f, 0f, 30f, dot)
+        if (holding || SystemClock.uptimeMillis() < pulseUntil) canvas.drawCircle(0f, 0f, 26f, ring)
         canvas.drawPath(arrow, fill)
         canvas.drawPath(arrow, edge)
         canvas.restore()
