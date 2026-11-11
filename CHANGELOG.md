@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2 — 2026-11-11 · Disconnect fixed
+
+- Disconnect works again, in the app and on the notification, even if the watch has stopped answering
+- After you disconnect, Syndesia no longer reconnects by itself until you connect again (or reopen the app)
+- If the watch goes silent, Syndesia notices and frees up the connection instead of getting stuck
+
 ## 1.1 — 2026-11-10 · Stays connected
 
 - The watch now stays connected until you tap Disconnect or swipe Syndesia away from Recents, even while you're choosing files or using other apps

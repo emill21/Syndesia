@@ -37,7 +37,8 @@ class LinkService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_DISCONNECT) {
-            scope.launch { Adb.disconnect() }
+            Adb.disconnect()
+            stop()
             return START_NOT_STICKY
         }
         // Must call startForeground promptly after startForegroundService.
@@ -59,10 +60,8 @@ class LinkService : Service() {
 
     /** Swiped away from Recents = "closed completely": drop the link and go. */
     override fun onTaskRemoved(rootIntent: Intent?) {
-        scope.launch {
-            Adb.disconnect()
-            stop()
-        }
+        Adb.disconnect()
+        stop()
         super.onTaskRemoved(rootIntent)
     }
 

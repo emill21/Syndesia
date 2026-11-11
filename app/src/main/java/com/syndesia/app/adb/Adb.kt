@@ -3,6 +3,7 @@ package com.syndesia.app.adb
 import android.content.Context
 import android.os.Build
 import io.github.muntashirakon.adb.AbsAdbConnectionManager
+import io.github.muntashirakon.adb.AdbConnection
 import io.github.muntashirakon.adb.AdbAuthenticationFailedException
 import io.github.muntashirakon.adb.AdbPairingRequiredException
 import io.github.muntashirakon.adb.AdbStream
@@ -94,6 +95,19 @@ object Adb {
     @Volatile
     private var lastPing = 0L
 
+    /**
+     * The live connection, kept outside the manager. The manager guards everything with one lock, and a
+     * stream open waiting on a silent watch holds that lock forever, so closing through the manager can
+     * hang. Closing the connection's socket directly always works and wakes every waiting stream.
+     */
+    @Volatile
+    private var conn: AdbConnection? = null
+
+    /** Set when the user taps Disconnect: no automatic connecting until they connect again by hand. */
+    @Volatile
+    var userDisconnected = false
+        private set
+
     private fun manager(context: Context): Manager {
         manager?.let { return it }
         val (key, cert) = Keys.load(context)
@@ -105,7 +119,7 @@ object Adb {
         wanted = false
         reconnectJob?.cancel()
         watchdog?.cancel()
-        runCatching { manager?.disconnect() }
+        teardown()
         manager = null
         _link.value = Link.Idle
     }
@@ -124,14 +138,16 @@ object Adb {
     /** User-initiated connect. Cancels any automatic reconnect in progress. */
     suspend fun connect(context: Context, host: String, port: Int): Result<WatchInfo> {
         reconnectJob?.cancel()
+        userDisconnected = false
         return connectOnce(context.applicationContext, host, port, reconnecting = false)
     }
 
     private suspend fun connectOnce(context: Context, host: String, port: Int, reconnecting: Boolean): Result<WatchInfo> = withContext(Dispatchers.IO) {
         connectLock.withLock {
             val m = manager(context)
-            runCatching { m.disconnect() }
             watchdog?.cancel()
+            closeConn()
+            runCatching { m.disconnect() }
             _link.value = Link.Connecting(host, port, reconnecting = reconnecting)
             // A slow "Allow debugging?" prompt on older watches: flag it so the UI can say so.
             val hint = if (reconnecting) null else scope.launch {
@@ -143,6 +159,7 @@ object Adb {
                 reachable(host, port)
                 val ok = m.connect(host, port)
                 if (!ok && !m.isConnected) throw IOException("The watch didn't answer in time. If it asked \"Allow debugging?\", tap Allow and try again.")
+                conn = m.adbConnection
                 writeChunk = runCatching { m.adbConnection?.maxData ?: 4096 }.getOrDefault(4096).coerceIn(4096, 256 * 1024)
                 readInfo(host, port)
             }
@@ -150,6 +167,7 @@ object Adb {
             result.onSuccess {
                 if (reconnecting && !wanted) {
                     // The user disconnected while we were reconnecting.
+                    closeConn()
                     runCatching { m.disconnect() }
                     _link.value = Link.Idle
                 } else {
@@ -159,6 +177,7 @@ object Adb {
                     startWatchdog()
                 }
             }.onFailure { e ->
+                closeConn()
                 runCatching { m.disconnect() }
                 if (!reconnecting) {
                     val pairing = e is AdbPairingRequiredException || e.cause is AdbPairingRequiredException
@@ -169,13 +188,30 @@ object Adb {
         }
     }
 
-    /** Only the user (or closing the app) ends the link. */
-    suspend fun disconnect() = withContext(Dispatchers.IO) {
+    /** Only the user (or closing the app) ends the link. Returns at once; the socket closes in the background. */
+    fun disconnect() {
         wanted = false
+        userDisconnected = true
         reconnectJob?.cancel()
         watchdog?.cancel()
-        runCatching { manager?.disconnect() }
         _link.value = Link.Idle
+        teardown()
+    }
+
+    private fun closeConn() {
+        val c = conn
+        conn = null
+        if (c != null) runCatching { c.close() }
+    }
+
+    /**
+     * Close the current connection's socket directly, off the calling thread. It never waits on the
+     * manager's lock, and only ever touches the connection that was live when it was called.
+     */
+    private fun teardown() {
+        val c = conn
+        conn = null
+        if (c != null) scope.launch { runCatching { c.close() } }
     }
 
     /** Clear a failure message (e.g. after the user dismisses it). */
@@ -211,7 +247,7 @@ object Adb {
 
     private fun lost(info: WatchInfo) {
         watchdog?.cancel()
-        runCatching { manager?.disconnect() }
+        teardown()
         val ctx = appContext
         if (wanted && ctx != null) reconnect(ctx, info)
         else {
@@ -227,7 +263,7 @@ object Adb {
             val deadline = System.currentTimeMillis() + 120_000
             var attempt = 0
             _link.value = Link.Connecting(info.host, info.port, reconnecting = true)
-            while (isActive && wanted && System.currentTimeMillis() < deadline) {
+            while (isActive && wanted && !userDisconnected && System.currentTimeMillis() < deadline) {
                 val f = Discovery.found.value.firstOrNull {
                     it.host == info.host || (info.serial.isNotBlank() && it.serial == info.serial)
                 }

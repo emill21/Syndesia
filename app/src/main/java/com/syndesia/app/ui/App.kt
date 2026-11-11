@@ -174,12 +174,12 @@ class SyndesiaState(private val ctx: Context) {
 
     fun disconnect() {
         hunting = null
-        scope.launch { Adb.disconnect() }
+        Adb.disconnect()
     }
 
     /** First launch / resume: reconnect to the last watch. */
     fun autoStart() {
-        if (!autoConnect) return
+        if (!autoConnect || Adb.userDisconnected) return
         val l = Adb.link.value
         if (l !is Link.Idle) return
         val last = saved.firstOrNull() ?: return
@@ -189,7 +189,7 @@ class SyndesiaState(private val ctx: Context) {
 
     /** mDNS saw something: if it's a saved watch we're not connected to, connect. */
     fun onFound(found: List<Found>) {
-        if (!autoConnect) return
+        if (!autoConnect || Adb.userDisconnected) return
         val l = Adb.link.value
         if (l is Link.Connected || l is Link.Connecting) return
         if (l is Link.Failed && l.needsPairing) return
