@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4 — 2026-11-11 · Bluetooth transfers
+
+- Install apps over Bluetooth: when the watch isn't on Wi-Fi, apps go to Syndesia on the watch, which asks you to confirm each install
+- Send files over Bluetooth from the Files tab or the share sheet. Music lands in Music, pictures in Pictures, videos in Movies, everything else in Download, each in a Syndesia folder
+- Update the watch helper from the Install tab (over Wi-Fi) to turn this on
+
 ## 1.3 — 2026-11-11 · Watch helper
 
 - New: Syndesia for your watch. Install it from the Install tab with one tap; it's bundled inside the phone app

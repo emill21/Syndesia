@@ -138,6 +138,8 @@ class SyndesiaState(private val ctx: Context) {
 
     init {
         Installer.options = InstallOptions(allowDowngrade, grantPermissions)
+        Installer.appContext = ctx
+        Helper.listen(ctx)
         Adb.onReconnecting = { Helper.wakeAsync(ctx, force = true) }
         Adb.onLost = { host, _ ->
             scope.launch {
@@ -261,7 +263,11 @@ class SyndesiaState(private val ctx: Context) {
             onTab(STab.Install)
         }
         if (others.isNotEmpty()) {
-            if (Adb.connected == null) {
+            if (Adb.connected == null && helperNearby) {
+                // No Wi-Fi link: send them over Bluetooth to Syndesia on the watch.
+                Transfers.uploadBluetooth(ctx, others)
+                if (apks.isEmpty()) onTab(STab.Files)
+            } else if (Adb.connected == null) {
                 notice = "Connect a watch first, then share the files again to send them."
             } else {
                 val dir = "$STORAGE_ROOT/Download"
@@ -310,7 +316,7 @@ fun SyndesiaApp(onReplayTour: () -> Unit) {
     val notifyPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val isConnected = link is Link.Connected
     LaunchedEffect(isConnected) {
-        if (!isConnected) return@LaunchedEffect
+        if (!isConnected) { st.refreshHelper(); return@LaunchedEffect }
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         // Keep the link alive in the background until the user disconnects or closes the app.
         LinkService.start(ctx)

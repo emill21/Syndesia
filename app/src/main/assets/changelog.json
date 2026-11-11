@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.4",
+    "date": "2026-11-11",
+    "title": "Bluetooth transfers",
+    "items": [
+      "Install apps over Bluetooth: when the watch isn't on Wi-Fi, apps go to Syndesia on the watch, which asks you to confirm each install",
+      "Send files over Bluetooth from the Files tab or the share sheet. Music lands in Music, pictures in Pictures, videos in Movies, everything else in Download, each in a Syndesia folder",
+      "Update the watch helper from the Install tab (over Wi-Fi) to turn this on"
+    ]
+  },
+  {
     "version": "1.3",
     "date": "2026-11-11",
     "title": "Watch helper",

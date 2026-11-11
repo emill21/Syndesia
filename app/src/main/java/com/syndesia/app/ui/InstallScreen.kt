@@ -57,6 +57,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.syndesia.app.adb.InstallItem
 import com.syndesia.app.adb.InstallStatus
 import com.syndesia.app.adb.Installer
+import com.syndesia.app.adb.active
 import com.syndesia.app.adb.Link
 import com.syndesia.app.adb.Watch
 import kotlinx.coroutines.launch
@@ -78,14 +79,17 @@ fun InstallScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: 
         st.addApks(uris)
     }
     val connected = link is Link.Connected
+    // Without Wi-Fi, installs can still go through Syndesia on the watch, over Bluetooth.
+    val bluetooth = !connected && st.helperNearby
     val queued = items.count { it.status == InstallStatus.Queued }
-    val running = items.any { it.status is InstallStatus.Sending || it.status == InstallStatus.Installing }
+    val running = items.any { it.status.active }
     val finished = items.count { it.status == InstallStatus.Done || it.status is InstallStatus.Failed }
 
     LazyColumn(contentPadding = padding.withPage(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         animatedItem(0) {
             PickCard(
                 connected = connected,
+                bluetooth = bluetooth,
                 preparing = st.preparing,
                 onPick = { picker.launch(arrayOf("*/*")) },
                 onConnect = { onTab(STab.Watch) },
@@ -108,17 +112,18 @@ fun InstallScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: 
                     if (running) TextButton(onClick = { Installer.cancel() }) { Text("Stop") }
                 }
             }
-            items(items, key = { it.pkg.id }) { item -> InstallRow(st, item, connected) }
+            items(items, key = { it.pkg.id }) { item -> InstallRow(st, item, connected, bluetooth) }
             if (queued > 0) item {
                 Button(
                     onClick = { Installer.start() },
-                    enabled = connected && !running,
+                    enabled = (connected || bluetooth) && !running,
                     modifier = Modifier.fillMaxWidth().height(56.dp),
                 ) {
                     Icon(Icons.Rounded.Upload, null)
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        if (!connected) "Connect a watch to install"
+                        if (!connected && !bluetooth) "Connect a watch to install"
+                        else if (bluetooth) (if (queued == 1) "Install over Bluetooth" else "Install all $queued over Bluetooth")
                         else if (queued == 1) "Install on watch" else "Install all $queued",
                         style = MaterialTheme.typography.titleMedium,
                     )
@@ -137,7 +142,7 @@ fun InstallScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: 
 }
 
 @Composable
-private fun PickCard(connected: Boolean, preparing: Boolean, onPick: () -> Unit, onConnect: () -> Unit) {
+private fun PickCard(connected: Boolean, bluetooth: Boolean, preparing: Boolean, onPick: () -> Unit, onConnect: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     GradientCard(top = colors.primaryContainer.copy(alpha = 0.8f), bottom = colors.surfaceContainerLow) {
         Column(Modifier.fillMaxWidth().padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -161,7 +166,15 @@ private fun PickCard(connected: Boolean, preparing: Boolean, onPick: () -> Unit,
                     Text("Choose APKs", style = MaterialTheme.typography.titleMedium)
                 }
             }
-            if (!connected) {
+            if (bluetooth) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Not on Wi-Fi: apps will go over Bluetooth to Syndesia on your watch, and the watch asks you to confirm each install. Slower, but no Wi-Fi needed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+            } else if (!connected) {
                 Spacer(Modifier.height(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Rounded.LinkOff, null, Modifier.size(18.dp), tint = colors.onSurfaceVariant)
@@ -175,7 +188,7 @@ private fun PickCard(connected: Boolean, preparing: Boolean, onPick: () -> Unit,
 }
 
 @Composable
-private fun InstallRow(st: SyndesiaState, item: InstallItem, connected: Boolean) {
+private fun InstallRow(st: SyndesiaState, item: InstallItem, connected: Boolean, bluetooth: Boolean) {
     val colors = MaterialTheme.colorScheme
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -224,19 +237,29 @@ private fun InstallRow(st: SyndesiaState, item: InstallItem, connected: Boolean)
                 )
             }
             Spacer(Modifier.height(10.dp))
+            val viaBt by Installer.viaBluetooth.collectAsStateWithLifecycle()
             when (val s = item.status) {
                 InstallStatus.Queued -> Text(
-                    if (connected) "Ready to install" else "Waiting for a watch",
+                    if (connected) "Ready to install" else if (bluetooth) "Ready to install over Bluetooth" else "Waiting for a watch",
                     style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant,
                 )
                 is InstallStatus.Sending -> {
                     val f = if (s.total > 0) (s.sent.toFloat() / s.total).coerceIn(0f, 1f) else 0f
-                    Text("Sending to watch · ${(f * 100).toInt()}% of ${formatBytes(s.total)}", style = MaterialTheme.typography.labelLarge, color = colors.primary)
+                    Text((if (viaBt) "Sending over Bluetooth · " else "Sending to watch · ") + "${(f * 100).toInt()}% of ${formatBytes(s.total)}", style = MaterialTheme.typography.labelLarge, color = colors.primary)
                     Spacer(Modifier.height(6.dp))
                     LinearProgressIndicator(progress = { f }, modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)))
                 }
+                InstallStatus.ConfirmOnWatch -> {
+                    Text("Tap Install on your watch", style = MaterialTheme.typography.labelLarge, color = colors.primary)
+                    Text(
+                        "The watch is asking to confirm. If you don't see it, check its notifications.",
+                        style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)))
+                }
                 InstallStatus.Installing -> {
-                    Text("Installing on watch…", style = MaterialTheme.typography.labelLarge, color = colors.primary)
+                    Text(if (viaBt) "Handing it to the watch…" else "Installing on watch…", style = MaterialTheme.typography.labelLarge, color = colors.primary)
                     Spacer(Modifier.height(6.dp))
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)))
                 }
@@ -265,7 +288,7 @@ private fun InstallRow(st: SyndesiaState, item: InstallItem, connected: Boolean)
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilledTonalButton(onClick = { Installer.retry(p.id) }, enabled = connected) {
+                        FilledTonalButton(onClick = { Installer.retry(p.id) }, enabled = connected || bluetooth) {
                             Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Try again")
                         }
                         if (s.code == "INSTALL_FAILED_VERSION_DOWNGRADE" && !st.allowDowngrade) {
@@ -298,7 +321,7 @@ private fun HelperCard(st: SyndesiaState, link: Link) {
         }
     }
     val bundled = BuildConfig.VERSION_CODE.toLong()
-    val busy = items.any { it.pkg.packageName == Helper.PACKAGE && (it.status == InstallStatus.Queued || it.status is InstallStatus.Sending || it.status == InstallStatus.Installing) }
+    val busy = items.any { it.pkg.packageName == Helper.PACKAGE && (it.status == InstallStatus.Queued || it.status.active) }
     val upToDate = onWatch != null && onWatch!! >= bundled
     SectionCard {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {

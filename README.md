@@ -17,6 +17,8 @@ Syndesia carries a small Wear OS app inside it. Install it from the **Install** 
 - asks Wear OS for Wi-Fi, which joins a saved network even while Bluetooth is connected, and holds it while you're connected;
 - switches **Wireless debugging** back on (Syndesia grants it `WRITE_SECURE_SETTINGS` over ADB during setup).
 
+Without Wi-Fi at all, the helper also receives over Bluetooth: APKs (the watch asks you to confirm each install) and files, which are saved to Music, Pictures, Movies or Download in a Syndesia folder. Slower, and no browsing, uninstalling or screenshots, since those need ADB.
+
 The watch's Wi-Fi setting must be On or Automatic, and the network must be one the watch has joined before.
 
 ## Install

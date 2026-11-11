@@ -7,6 +7,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
@@ -19,9 +21,15 @@ sealed interface InstallStatus {
     data object Queued : InstallStatus
     data class Sending(val sent: Long, val total: Long) : InstallStatus
     data object Installing : InstallStatus
+    /** Sent over Bluetooth; the watch is showing its "Install?" screen. */
+    data object ConfirmOnWatch : InstallStatus
     data object Done : InstallStatus
     data class Failed(val message: String, val code: String? = null) : InstallStatus
 }
+
+/** Sending, installing or waiting on the watch. */
+val InstallStatus.active: Boolean
+    get() = this is InstallStatus.Sending || this == InstallStatus.Installing || this == InstallStatus.ConfirmOnWatch
 
 data class InstallItem(val pkg: ApkPackage, val status: InstallStatus = InstallStatus.Queued, val startedAt: Long = 0, val finishedAt: Long = 0)
 
@@ -38,6 +46,13 @@ object Installer {
     private var worker: Job? = null
     var options = InstallOptions()
 
+    /** Needed for Bluetooth installs (Data Layer). Set once at app start. */
+    var appContext: android.content.Context? = null
+
+    /** True while the current install goes over Bluetooth rather than ADB. */
+    private val _viaBluetooth = MutableStateFlow(false)
+    val viaBluetooth: StateFlow<Boolean> = _viaBluetooth.asStateFlow()
+
     /** Bumped after each successful install, so the Apps tab knows to refresh. */
     private val _installed = MutableStateFlow(0)
     val installed: StateFlow<Int> = _installed.asStateFlow()
@@ -47,11 +62,11 @@ object Installer {
     }
 
     fun remove(id: Long) {
-        _items.update { list -> list.filterNot { it.pkg.id == id && it.status !is InstallStatus.Sending && it.status != InstallStatus.Installing } }
+        _items.update { list -> list.filterNot { it.pkg.id == id && !it.status.active } }
     }
 
     fun clearFinished() {
-        _items.update { list -> list.filter { it.status == InstallStatus.Queued || it.status is InstallStatus.Sending || it.status == InstallStatus.Installing } }
+        _items.update { list -> list.filter { it.status == InstallStatus.Queued || it.status.active } }
     }
 
     fun retry(id: Long) {
@@ -67,9 +82,15 @@ object Installer {
         worker = scope.launch {
             while (true) {
                 val next = _items.value.firstOrNull { it.status == InstallStatus.Queued } ?: break
-                if (Adb.connected == null) break
+                // No ADB link: fall back to the watch helper over Bluetooth, if it's reachable.
+                val ctx = appContext
+                val node = if (Adb.connected == null && ctx != null) Helper.bestNode(ctx) else null
+                if (Adb.connected == null && node == null) break
+                _viaBluetooth.value = node != null
                 set(next.pkg.id) { it.copy(status = InstallStatus.Sending(0, next.pkg.totalBytes), startedAt = System.currentTimeMillis()) }
-                val result = runCatching { install(next.pkg) }
+                val result = runCatching {
+                    if (node != null && ctx != null) installOverBluetooth(ctx, node, next.pkg) else install(next.pkg)
+                }
                 set(next.pkg.id) {
                     it.copy(
                         status = result.fold(
@@ -79,7 +100,7 @@ object Installer {
                         finishedAt = System.currentTimeMillis(),
                     )
                 }
-                if (result.isSuccess && next.pkg.packageName == Helper.PACKAGE) {
+                if (result.isSuccess && node == null && next.pkg.packageName == Helper.PACKAGE) {
                     // The watch helper: grant its permissions and start it once.
                     runCatching { Helper.setUp() }
                 }
@@ -92,7 +113,7 @@ object Installer {
         worker?.cancel()
         _items.update { list ->
             list.map {
-                if (it.status is InstallStatus.Sending || it.status == InstallStatus.Installing) it.copy(status = InstallStatus.Failed("Cancelled"))
+                if (it.status.active) it.copy(status = InstallStatus.Failed("Cancelled"))
                 else it
             }
         }
@@ -112,6 +133,39 @@ object Installer {
             if (options.grantPermissions && sdk >= 23) append(" -g")
             // Android 14+ blocks very old targetSdk apps unless asked not to; plenty of watch APKs are old.
             if (sdk >= 34) append(" --bypass-low-target-sdk-block")
+        }
+    }
+
+    /** Send the APK(s) to the watch helper, which hands them to the system installer (the watch asks to confirm). */
+    private suspend fun installOverBluetooth(ctx: android.content.Context, node: String, pkg: ApkPackage) {
+        val installId = "i${pkg.id}-${System.currentTimeMillis()}"
+        val outcome = Helper.expect(installId)
+        try {
+            val total = pkg.totalBytes
+            var base = 0L
+            pkg.files.forEachIndexed { i, f ->
+                val header = org.json.JSONObject()
+                    .put("kind", "apk").put("id", "$installId-$i").put("install", installId)
+                    .put("index", i).put("count", pkg.files.size)
+                    .put("name", f.name).put("size", f.length())
+                val reply = f.inputStream().use { input ->
+                    Helper.sendOverBluetooth(ctx, node, header, input, f.length()) { sent ->
+                        set(pkg.id) { it.copy(status = InstallStatus.Sending(base + sent, total)) }
+                    }
+                }
+                if (reply.stage == "failed") throw InstallFailure(reply.message ?: "The watch couldn't receive the APK", null)
+                base += f.length()
+            }
+            set(pkg.id) { it.copy(status = InstallStatus.Installing) }
+            val final = kotlinx.coroutines.withTimeoutOrNull(10 * 60_000L) {
+                outcome
+                    .onEach { rep -> if (rep?.stage == "confirm") set(pkg.id) { it.copy(status = InstallStatus.ConfirmOnWatch) } }
+                    .first { it?.stage == "installed" || it?.stage == "failed" }
+            }
+            if (final == null) throw InstallFailure("The watch didn't say whether it installed. Check the watch for an \"Install\" prompt.", null)
+            if (final.stage == "failed") throw InstallFailure(final.message ?: "Install failed on the watch", null)
+        } finally {
+            Helper.forget(installId)
         }
     }
 

@@ -33,6 +33,7 @@ data class Transfer(
     /** Where a download ended up, to open or share it. */
     val result: Uri? = null,
     val where: String? = null,
+    val viaBluetooth: Boolean = false,
 ) {
     enum class State { Waiting, Running, Done, Failed }
     val fraction: Float get() = if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else 0f
@@ -83,6 +84,41 @@ object Transfers {
                     }.onSuccess {
                         set(t.id) { it.copy(state = Transfer.State.Done, done = if (it.total > 0) it.total else it.done, where = target) }
                         _uploaded.value++
+                    }.onFailure { e ->
+                        set(t.id) { it.copy(state = Transfer.State.Failed, error = e.message ?: e.javaClass.simpleName) }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Send files to the watch helper over Bluetooth (no Wi-Fi needed). The watch files them by type:
+     * Music/Syndesia, Pictures/Syndesia, Movies/Syndesia, or Download/Syndesia.
+     */
+    fun uploadBluetooth(context: Context, uris: List<Uri>) {
+        val app = context.applicationContext
+        for (uri in uris) {
+            val name = Apk.displayName(app, uri)
+            val size = Apk.size(app, uri) ?: -1L
+            val t = Transfer(nextId++, name, Direction.ToWatch, size, viaBluetooth = true)
+            add(t)
+            scope.launch {
+                lock.withLock {
+                    set(t.id) { it.copy(state = Transfer.State.Running) }
+                    runCatching {
+                        val node = Helper.bestNode(app) ?: error("Can't reach Syndesia on your watch over Bluetooth")
+                        val header = org.json.JSONObject()
+                            .put("kind", "file").put("id", "f${t.id}-${System.currentTimeMillis()}")
+                            .put("name", name).put("size", size)
+                            .put("mime", app.contentResolver.getType(uri) ?: "")
+                        val input = app.contentResolver.openInputStream(uri) ?: error("Couldn't open $name")
+                        input.use { s ->
+                            Helper.sendOverBluetooth(app, node, header, s, size) { sent -> set(t.id) { it.copy(done = sent) } }
+                        }
+                    }.onSuccess { reply ->
+                        if (reply.stage == "failed") set(t.id) { it.copy(state = Transfer.State.Failed, error = reply.message ?: "The watch couldn't save it") }
+                        else set(t.id) { it.copy(state = Transfer.State.Done, done = if (it.total > 0) it.total else it.done, where = reply.message) }
                     }.onFailure { e ->
                         set(t.id) { it.copy(state = Transfer.State.Failed, error = e.message ?: e.javaClass.simpleName) }
                     }

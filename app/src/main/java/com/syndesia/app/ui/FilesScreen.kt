@@ -131,9 +131,21 @@ fun FilesScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: (S
         st.filesPath = path.trimEnd('/').substringBeforeLast('/').ifBlank { "/" }
     }
 
+    val btUpload = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) Transfers.uploadBluetooth(ctx, uris)
+    }
+
     if (!connected) {
         LazyColumn(contentPadding = padding.withPage(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            animatedItem(0) {
+            if (st.helperNearby) animatedItem(0) {
+                EmptyState(
+                    Icons.Rounded.Upload, "Send over Bluetooth",
+                    "Not on Wi-Fi? Syndesia on your watch can still receive files over Bluetooth (slower). " +
+                        "Music goes to Music, pictures to Pictures, videos to Movies, everything else to Download, each in a Syndesia folder.",
+                    "Choose files", onAction = { btUpload.launch(arrayOf("*/*")) },
+                )
+            }
+            animatedItem(1) {
                 EmptyState(
                     Icons.Rounded.Folder,
                     if ((link as? Link.Connecting)?.reconnecting == true) "Reconnecting to your watch…" else "No watch connected",
@@ -337,9 +349,9 @@ fun TransfersCard(list: List<Transfer>) {
                         Text(
                             when (t.state) {
                                 Transfer.State.Waiting -> "Waiting"
-                                Transfer.State.Running -> (if (t.direction == Direction.ToWatch) "Sending · " else "Saving · ") +
+                                Transfer.State.Running -> (if (t.viaBluetooth) "Sending over Bluetooth · " else if (t.direction == Direction.ToWatch) "Sending · " else "Saving · ") +
                                     if (t.total > 0) "${(t.fraction * 100).toInt()}% of ${formatBytes(t.total)}" else formatBytes(t.done)
-                                Transfer.State.Done -> if (t.direction == Direction.ToWatch) "On the watch" else "Saved to ${t.where}"
+                                Transfer.State.Done -> if (t.direction == Direction.ToWatch) "On the watch" + (if (t.viaBluetooth && t.where != null) " · ${t.where}" else "") else "Saved to ${t.where}"
                                 Transfer.State.Failed -> t.error ?: "Failed"
                             },
                             style = MaterialTheme.typography.bodySmall,
