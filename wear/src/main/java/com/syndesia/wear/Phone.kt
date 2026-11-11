@@ -74,6 +74,7 @@ object Phone {
         withTimeoutOrNull(5000) {
             val nodes = Wearable.getCapabilityClient(ctx.applicationContext)
                 .getCapability(CAPABILITY, CapabilityClient.FILTER_REACHABLE).await().nodes
+                .ifEmpty { Wearable.getNodeClient(ctx.applicationContext).connectedNodes.await().toSet() }
             (nodes.firstOrNull { it.isNearby } ?: nodes.firstOrNull())?.id
         }
     }.getOrNull()

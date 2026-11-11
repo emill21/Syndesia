@@ -42,9 +42,13 @@ object Helper {
     /** Watches with the helper installed that are reachable over Bluetooth right now. */
     suspend fun nodes(context: Context): List<String> = runCatching {
         withTimeoutOrNull(5000) {
-            Wearable.getCapabilityClient(context.applicationContext)
+            val withApp = Wearable.getCapabilityClient(context.applicationContext)
                 .getCapability(CAPABILITY, CapabilityClient.FILTER_REACHABLE).await()
                 .nodes.map { it.id }
+            // Older helper builds didn't advertise themselves; fall back to any connected watch.
+            withApp.ifEmpty {
+                Wearable.getNodeClient(context.applicationContext).connectedNodes.await().map { it.id }
+            }
         }.orEmpty()
     }.getOrDefault(emptyList())
 
@@ -111,6 +115,7 @@ object Helper {
         withTimeoutOrNull(5000) {
             val nodes = Wearable.getCapabilityClient(context.applicationContext)
                 .getCapability(CAPABILITY, CapabilityClient.FILTER_REACHABLE).await().nodes
+                .ifEmpty { Wearable.getNodeClient(context.applicationContext).connectedNodes.await().toSet() }
             (nodes.firstOrNull { it.isNearby } ?: nodes.firstOrNull())?.id
         }
     }.getOrNull()

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.1 — 2026-11-11 · Bluetooth fix
+
+- Fixed: the phone couldn't find Syndesia on the watch over Bluetooth, so Bluetooth sending, installing and waking the watch's Wi-Fi never kicked in. Just updating the phone app makes it work with the watch app you already have
+- The watch app now advertises itself properly too (update it from the Install tab next time you're on Wi-Fi)
+
 ## 1.6 — 2026-11-11 · A better watch app
 
 - Watch app redesigned with Material 3 Expressive for Wear OS
