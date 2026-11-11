@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.3 — 2026-11-11 · Hotspot connect fix
+
+- Fixed: the watch joining the phone's hotspot but Syndesia not connecting. Syndesia now searches the watch for its debugging port directly, since the watch's usual announcement doesn't reach the phone over its own hotspot
+- If Wireless debugging switches itself off on the hotspot, Syndesia now says so and how to fix it
+- Syndesia will offer to update the watch app over Bluetooth first
+
 ## 1.8.2 — 2026-11-11 · Hotspot timing fix
 
 - Fixed: the phone's hotspot switching off before the watch could join it, which also made a new hotspot appear on every try

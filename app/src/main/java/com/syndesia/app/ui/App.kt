@@ -84,6 +84,7 @@ import com.syndesia.app.adb.Discovery
 import com.syndesia.app.adb.Found
 import com.syndesia.app.adb.Helper
 import com.syndesia.app.adb.Hotspot
+import com.syndesia.app.adb.PortScan
 import com.syndesia.app.adb.InstallOptions
 import com.syndesia.app.adb.Installer
 import com.syndesia.app.adb.Link
@@ -252,21 +253,22 @@ class SyndesiaState(private val ctx: Context) {
                         "approve" -> hotspotStage = "On your watch, tap Connect to join ${creds.ssid}"
                     }
                 }
-                val ip = addr.substringBefore(':')
-                val reported = addr.substringAfter(':', "").toIntOrNull()
-                hotspotStage = "Connecting over the hotspot…"
+                // The watch answers "ip[:port][;dbg=1|0]".
+                val parts = addr.split(';')
+                val ip = parts[0].substringBefore(':')
+                val reported = parts[0].substringAfter(':', "").toIntOrNull()
+                val debugging = parts.firstOrNull { it.startsWith("dbg=") }?.removePrefix("dbg=")
+                hotspotStage = "Looking for your watch on the hotspot…"
                 Discovery.restart(ctx)
-                val viaMdns = withTimeoutOrNull(8000) {
-                    var p: Int? = null
-                    while (p == null) {
-                        p = Discovery.found.value.firstOrNull { it.host == ip }?.connectPort
-                        if (p == null) delay(300)
-                    }
-                    p
-                }
-                // Wireless debugging's port (from the watch or mDNS), then the classic port 5555.
-                val ports = listOfNotNull(reported, viaMdns, 5555).distinct()
+                // mDNS often doesn't cross the phone's own hotspot, so also look for open ports directly.
+                val scanned = PortScan.open(ip)
+                val viaMdns = Discovery.found.value.firstOrNull { it.host == ip }?.connectPort
+                val ports = (listOfNotNull(reported, viaMdns) + scanned.filter { it != 5555 } + listOf(5555))
+                    .distinct().take(8)
+                hotspotStage = "Connecting over the hotspot…"
                 for (p in ports) {
+                    if (p != 5555 && p !in scanned && p != reported && p != viaMdns) continue
+                    if (p == 5555 && 5555 !in scanned) continue
                     val r = Adb.connect(ctx, ip, p)
                     val info = r.getOrNull()
                     if (info != null) {
@@ -277,7 +279,16 @@ class SyndesiaState(private val ctx: Context) {
                     }
                     if ((Adb.link.value as? Link.Failed)?.needsPairing == true) break
                 }
-                if (!ok) notice = "Your watch joined the hotspot, but Syndesia couldn't connect yet. On the watch, make sure Wireless debugging is on, and if it asks \"Allow wireless debugging on this network?\" tap Always allow. Then try again."
+                if (!ok) notice = when {
+                    debugging == "0" ->
+                        "Your watch joined the hotspot, but Wireless debugging switched itself off there: Android only allows it on networks you've approved. " +
+                            "Connect once over regular Wi-Fi and tap Skip the network prompt (About this watch); after that the hotspot works until the watch restarts."
+                    scanned.isEmpty() ->
+                        "Your watch joined the hotspot at $ip, but nothing on it is accepting connections. If the watch asks \"Allow wireless debugging on this network?\", tap Always allow and try again. " +
+                            "Otherwise connect once over regular Wi-Fi and tap Skip the network prompt (About this watch)."
+                    else ->
+                        "Your watch joined the hotspot at $ip but Syndesia couldn't connect (tried ${ports.joinToString()}). Check the watch for an \"Allow debugging?\" prompt and try again."
+                }
             } catch (e: Helper.Outdated) {
                 offerHelperUpdate = true
             } catch (e: Throwable) {

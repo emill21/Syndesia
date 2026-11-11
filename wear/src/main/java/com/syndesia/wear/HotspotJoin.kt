@@ -82,10 +82,17 @@ object HotspotJoin {
                 return@launch
             }
             WifiHold.enableWirelessDebugging(ctx)
-            // Wireless debugging takes a moment to come up on the new network.
-            delay(2500)
+            // Wireless debugging takes a moment to come up on the new network, and may switch itself
+            // back off if Android doesn't trust it. Check a few times so we can tell the phone.
+            var on = false
+            repeat(6) {
+                delay(1000)
+                WifiHold.enableWirelessDebugging(ctx)
+                on = WifiHold.wirelessDebuggingOn(ctx)
+            }
             val port = tlsPort()
-            Receiver.result(ctx, node, id, "joined", if (port != null) "$ip:$port" else ip)
+            val addr = (if (port != null) "$ip:$port" else ip) + ";dbg=" + (if (on) "1" else "0")
+            Receiver.result(ctx, node, id, "joined", addr)
         }
     }
 

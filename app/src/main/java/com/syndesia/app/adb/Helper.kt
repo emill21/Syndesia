@@ -37,7 +37,7 @@ object Helper {
     private const val PATH_PING = "/syndesia/ping"
 
     /** First watch-app version that can join the phone's hotspot. */
-    const val MIN_HOTSPOT_VERSION = 14L
+    const val MIN_HOTSPOT_VERSION = 15L
 
     /** The watch app is too old (or not answering) for what was asked. */
     class Outdated(message: String) : IOException(message)
