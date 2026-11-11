@@ -37,7 +37,10 @@ import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.FiberManualRecord
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.InstallMobile
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.LinkOff
@@ -91,6 +94,7 @@ import com.syndesia.app.adb.Adb
 import com.syndesia.app.adb.Discovery
 import com.syndesia.app.adb.Found
 import com.syndesia.app.adb.Link
+import com.syndesia.app.adb.Recorder
 import com.syndesia.app.adb.Transfers
 import com.syndesia.app.adb.Watch
 import com.syndesia.app.adb.WatchInfo
@@ -121,6 +125,7 @@ fun WatchScreen(st: SyndesiaState, link: Link, found: List<Found>, padding: Padd
             animatedItem(1) { StatsStrip(stats) }
             animatedItem(2) { QuickActions(st, onTab) }
             animatedItem(3) { ScreenshotCard() }
+            animatedItem(3) { RecordCard() }
             animatedItem(4) { CommandCard() }
             animatedItem(5) { DeviceCard(st, info, stats) }
         } else {
@@ -340,6 +345,78 @@ private fun ScreenshotCard() {
                 else Icon(Icons.Rounded.Screenshot, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text(if (shot == null) "Take screenshot" else "Take another")
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- recording
+
+@Composable
+private fun RecordCard() {
+    val ctx = LocalContext.current
+    val colors = MaterialTheme.colorScheme
+    val state by Recorder.state.collectAsState()
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(state) {
+        while (state is Recorder.State.Recording) { now = System.currentTimeMillis(); delay(250) }
+    }
+    SectionCard(title = "Screen recording") {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            when (val s = state) {
+                Recorder.State.Idle -> {
+                    Text(
+                        "Records the watch screen (up to ${Recorder.MAX_SECONDS / 60} minutes) and saves the video to Downloads/Syndesia/Recordings.",
+                        style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant,
+                    )
+                    Button(onClick = { Recorder.start(ctx) }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Rounded.FiberManualRecord, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Start recording")
+                    }
+                }
+                is Recorder.State.Recording -> {
+                    val secs = ((now - s.startedAt) / 1000).coerceAtLeast(0)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.FiberManualRecord, null, tint = Color(0xFFE53935), modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            String.format(Locale.US, "Recording  %d:%02d", secs / 60, secs % 60),
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text("max ${Recorder.MAX_SECONDS / 60}:00", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
+                    }
+                    Button(
+                        onClick = { Recorder.stop() },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = colors.error, contentColor = colors.onError),
+                    ) {
+                        Icon(Icons.Rounded.Stop, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Stop and save")
+                    }
+                }
+                Recorder.State.Stopping, is Recorder.State.Saving -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Text(if (s is Recorder.State.Saving) "Saving ${s.name} to your phone…" else "Finishing the video…", style = MaterialTheme.typography.bodyMedium)
+                }
+                is Recorder.State.Saved -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.CheckCircle, null, tint = colors.primary, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Saved to Downloads/Syndesia/Recordings", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    }
+                    Text("Open it from Files › Transfers, or your phone's Files app.", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledTonalButton(onClick = { Recorder.dismiss(); Recorder.start(ctx) }) { Text("Record again") }
+                        OutlinedButton(onClick = { Recorder.dismiss() }) { Text("Done") }
+                    }
+                }
+                is Recorder.State.Error -> {
+                    Text(s.message, color = colors.error, style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledTonalButton(onClick = { Recorder.dismiss(); Recorder.start(ctx) }) { Text("Try again") }
+                        OutlinedButton(onClick = { Recorder.dismiss() }) { Text("Dismiss") }
+                    }
+                }
             }
         }
     }

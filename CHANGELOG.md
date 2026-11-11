@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5 — 2026-11-11 · Record, preview, save folders
+
+- Install queue memory: your queue survives closing the app, and an install cut off by a dropped connection picks up again by itself when the watch is back
+- Screen recording: record the watch screen for up to 3 minutes from the Watch tab; videos land in Downloads/Syndesia/Recordings
+- Save whole folders: long-press a folder, or use the save button above the list, to copy everything inside (subfolders included) to the phone
+- Previews: look at pictures and read text files from the watch right in Syndesia; videos, music and other files open in an app on your phone
+
 ## 1.4 — 2026-11-11 · Bluetooth transfers
 
 - Install apps over Bluetooth: when the watch isn't on Wi-Fi, apps go to Syndesia on the watch, which asks you to confirm each install

@@ -128,7 +128,13 @@ object Transfers {
     }
 
     /** Save one watch file into Downloads/Syndesia (or [subfolder] inside it). */
-    fun download(context: Context, file: RemoteFile, subfolder: String? = null, rename: String? = null) {
+    fun download(
+        context: Context,
+        file: RemoteFile,
+        subfolder: String? = null,
+        rename: String? = null,
+        onDone: suspend (ok: Boolean) -> Unit = {},
+    ) {
         val app = context.applicationContext
         val name = rename ?: file.name
         val t = Transfer(nextId++, name, Direction.ToPhone, file.size)
@@ -153,9 +159,11 @@ object Transfers {
                     uri to where
                 }.onSuccess { (uri, where) ->
                     set(t.id) { it.copy(state = Transfer.State.Done, done = it.total, result = uri, where = where) }
+                    runCatching { onDone(true) }
                 }.onFailure { e ->
                     created?.let { u -> runCatching { app.contentResolver.delete(u, null, null) } }
                     set(t.id) { it.copy(state = Transfer.State.Failed, error = e.message ?: e.javaClass.simpleName) }
+                    runCatching { onDone(false) }
                 }
             }
         }

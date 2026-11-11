@@ -59,7 +59,8 @@ object Apk {
 
     /** Blocking: call off the main thread. Returns the apps found, plus a message for anything skipped. */
     fun prepare(context: Context, uris: List<Uri>): Pair<List<ApkPackage>, List<String>> {
-        val root = File(context.cacheDir, "incoming").apply { mkdirs() }
+        // App storage, not cache: queued installs must survive restarts (see Installer.restore).
+        val root = File(context.filesDir, "incoming").apply { mkdirs() }
         val problems = mutableListOf<String>()
         // Loose APKs picked together may be one split app; bundles are always one app.
         val loose = mutableListOf<Pair<File, String>>()
@@ -177,6 +178,6 @@ object Apk {
 
     /** Clear unpacked files from earlier sessions. */
     fun cleanCache(context: Context) {
-        runCatching { File(context.cacheDir, "incoming").deleteRecursively() }
+        runCatching { File(context.filesDir, "incoming").deleteRecursively() }
     }
 }

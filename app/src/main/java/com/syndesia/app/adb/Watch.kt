@@ -155,6 +155,35 @@ object Watch {
     suspend fun list(dir: String): List<RemoteFile> = Sync.use { it.list(dir) }
         .sortedWith(compareBy<RemoteFile> { !(it.isDir || it.isLink) }.thenBy { it.name.lowercase() })
 
+    /**
+     * Every file under [dir] (symlinks skipped), with each one's folder relative to [dir]
+     * ("" for files directly inside). Capped so a huge tree can't run away.
+     */
+    suspend fun walk(dir: String, maxFiles: Int = 5000): List<Pair<RemoteFile, String>> = Sync.use { sync ->
+        val out = mutableListOf<Pair<RemoteFile, String>>()
+        fun go(path: String, rel: String, depth: Int) {
+            if (depth > 24 || out.size >= maxFiles) return
+            val entries = runCatching { sync.list("$path/") }.getOrDefault(emptyList())
+            for (f in entries) {
+                if (out.size >= maxFiles) return
+                when {
+                    f.isDir -> go(f.path, if (rel.isEmpty()) f.name else "$rel/${f.name}", depth + 1)
+                    f.isFile -> out += f to rel
+                }
+            }
+        }
+        go(dir.trimEnd('/').ifBlank { "" }, "", 0)
+        out
+    }
+
+    /** Copy a watch file into the app's cache (for previews). */
+    suspend fun pullToCache(context: android.content.Context, file: RemoteFile, onProgress: (Long) -> Unit): java.io.File {
+        val dir = java.io.File(context.cacheDir, "shared/preview").apply { deleteRecursively(); mkdirs() }
+        val out = java.io.File(dir, file.name.replace('/', '_'))
+        out.outputStream().buffered(256 * 1024).use { o -> Sync.use { it.pull(file.path, o, onProgress) } }
+        return out
+    }
+
     suspend fun mkdir(path: String): String? = Adb.sh("mkdir -p ${Adb.q(path)}").trim().ifBlank { null }
     suspend fun delete(path: String): String? = Adb.sh("rm -rf ${Adb.q(path)}").trim().ifBlank { null }
     suspend fun rename(from: String, to: String): String? = Adb.sh("mv ${Adb.q(from)} ${Adb.q(to)}").trim().ifBlank { null }

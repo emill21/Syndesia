@@ -240,7 +240,8 @@ private fun InstallRow(st: SyndesiaState, item: InstallItem, connected: Boolean,
             val viaBt by Installer.viaBluetooth.collectAsStateWithLifecycle()
             when (val s = item.status) {
                 InstallStatus.Queued -> Text(
-                    if (connected) "Ready to install" else if (bluetooth) "Ready to install over Bluetooth" else "Waiting for a watch",
+                    if (item.interrupted) (if (connected) "Picking up where it left off…" else "Paused: the connection dropped. Resumes when the watch is back.")
+                    else if (connected) "Ready to install" else if (bluetooth) "Ready to install over Bluetooth" else "Waiting for a watch",
                     style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant,
                 )
                 is InstallStatus.Sending -> {

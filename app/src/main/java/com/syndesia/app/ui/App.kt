@@ -138,7 +138,7 @@ class SyndesiaState(private val ctx: Context) {
 
     init {
         Installer.options = InstallOptions(allowDowngrade, grantPermissions)
-        Installer.appContext = ctx
+        Installer.restore(ctx)
         Helper.listen(ctx)
         Adb.onReconnecting = { Helper.wakeAsync(ctx, force = true) }
         Adb.onLost = { host, _ ->
@@ -318,6 +318,8 @@ fun SyndesiaApp(onReplayTour: () -> Unit) {
     LaunchedEffect(isConnected) {
         if (!isConnected) { st.refreshHelper(); return@LaunchedEffect }
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        // Pick up installs a dropped connection interrupted.
+        Installer.resumeInterrupted()
         // Keep the link alive in the background until the user disconnects or closes the app.
         LinkService.start(ctx)
         if (Build.VERSION.SDK_INT >= 33 && !st.prefs.askedNotifications &&

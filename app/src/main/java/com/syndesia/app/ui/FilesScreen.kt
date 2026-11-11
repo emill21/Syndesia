@@ -3,7 +3,12 @@ package com.syndesia.app.ui
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -103,6 +108,19 @@ fun FilesScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: (S
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
     var selected by remember { mutableStateOf<RemoteFile?>(null) }
+    var previewing by remember { mutableStateOf<RemoteFile?>(null) }
+    var folderPlan by remember { mutableStateOf<Pair<RemoteFile, List<Pair<RemoteFile, String>>>?>(null) }
+    var counting by remember { mutableStateOf(false) }
+
+    /** Walk a folder, then ask before saving everything in it. */
+    fun planFolder(dir: RemoteFile) {
+        counting = true
+        scope.launch {
+            val all = runCatching { Watch.walk(dir.path) }.getOrElse { ctx.toast(it.message ?: "Couldn't read that folder"); emptyList() }
+            counting = false
+            if (all.isEmpty()) ctx.toast("Nothing to save in ${dir.name}") else folderPlan = dir to all
+        }
+    }
     var newFolder by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<RemoteFile?>(null) }
     var deleting by remember { mutableStateOf<RemoteFile?>(null) }
@@ -187,6 +205,13 @@ fun FilesScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: (S
                     IconButton(onClick = { st.setHidden(!st.showHidden) }) {
                         Icon(if (st.showHidden) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff, "Hidden files")
                     }
+                    IconButton(onClick = {
+                        val name = path.trimEnd('/').substringAfterLast('/').ifBlank { "Watch" }
+                        planFolder(RemoteFile(name, path.trimEnd('/').ifBlank { "/" }, 0x4000, 0, 0))
+                    }, enabled = !counting) {
+                        if (counting) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.Rounded.Download, "Save this folder to phone")
+                    }
                     IconButton(onClick = { reload++ }) { Icon(Icons.Rounded.Refresh, "Refresh") }
                 }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -212,7 +237,15 @@ fun FilesScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: (S
             }
             else -> {
                 item { SectionHeader("${shown.size} ${if (shown.size == 1) "item" else "items"}") }
-                items(shown, key = { it.path }) { f -> FileRow(f) { open(f) } }
+                item {
+                    Text(
+                        "Tip: long-press a folder to save all of it.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
+                }
+                items(shown, key = { it.path }) { f -> FileRow(f, onLongClick = { selected = f }) { open(f) } }
             }
         }
     }
@@ -227,8 +260,16 @@ fun FilesScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: (S
                     headlineContent = { Text(f.name, style = MaterialTheme.typography.titleMedium) },
                     supportingContent = { Text(listOf(formatBytes(f.size), formatDate(f.mtime)).filter { it.isNotBlank() }.joinToString(" · ")) },
                 )
-                SheetAction(Icons.Rounded.Download, "Save to phone", "Into Downloads/Syndesia") {
-                    Transfers.download(ctx, f); selected = null
+                if (f.isDir || f.isLink) {
+                    SheetAction(Icons.Rounded.FolderOpen, "Open", null) { st.filesPath = f.path; selected = null }
+                    SheetAction(Icons.Rounded.Download, "Save folder to phone", "Everything inside, into Downloads/Syndesia/${f.name}") {
+                        selected = null; planFolder(f)
+                    }
+                } else {
+                    SheetAction(Icons.Rounded.Visibility, "Preview", previewHint(f)) { previewing = f; selected = null }
+                    SheetAction(Icons.Rounded.Download, "Save to phone", "Into Downloads/Syndesia") {
+                        Transfers.download(ctx, f); selected = null
+                    }
                 }
                 if (f.name.endsWith(".apk", true)) {
                     SheetAction(Icons.Rounded.InstallMobile, "Install on watch", "Installs this APK straight from the watch's storage") {
@@ -243,6 +284,33 @@ fun FilesScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: (S
                 SheetAction(Icons.Rounded.Delete, "Delete", "From the watch", MaterialTheme.colorScheme.error) { deleting = f; selected = null }
             }
         }
+    }
+
+    previewing?.let { f -> PreviewDialog(f) { previewing = null } }
+
+    folderPlan?.let { (dir, all) ->
+        val total = all.sumOf { it.first.size }
+        val capped = all.size >= 5000
+        AlertDialog(
+            onDismissRequest = { folderPlan = null },
+            icon = { Icon(Icons.Rounded.Download, null) },
+            title = { Text("Save ${dir.name}?") },
+            text = {
+                Text(
+                    "${all.size}${if (capped) "+" else ""} files, ${formatBytes(total)}, into Downloads/Syndesia/${dir.name} on this phone. " +
+                        "Folders inside are kept as they are." + if (capped) " Only the first 5,000 files will be saved." else ""
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    folderPlan = null
+                    val base = dir.name.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                    all.forEach { (file, rel) -> Transfers.download(ctx, file, subfolder = if (rel.isEmpty()) base else "$base/$rel") }
+                    ctx.toast("Saving ${all.size} files — progress is under Transfers")
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { folderPlan = null }) { Text("Cancel") } },
+        )
     }
 
     if (newFolder) TextPromptDialog("New folder", "Folder name", "", "Create", onDone = { name ->
@@ -299,13 +367,14 @@ private fun iconFor(f: RemoteFile): ImageVector {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun FileRow(f: RemoteFile, onClick: () -> Unit) {
+private fun FileRow(f: RemoteFile, onLongClick: () -> Unit, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     Card(
         shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = colors.surfaceContainerLow),
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).combinedClickable(onLongClick = onLongClick, onClick = onClick),
     ) {
         Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             IconBadge(iconFor(f), if (f.isDir || f.isLink) colors.primary else colors.tertiary, 40.dp)

@@ -31,7 +31,14 @@ sealed interface InstallStatus {
 val InstallStatus.active: Boolean
     get() = this is InstallStatus.Sending || this == InstallStatus.Installing || this == InstallStatus.ConfirmOnWatch
 
-data class InstallItem(val pkg: ApkPackage, val status: InstallStatus = InstallStatus.Queued, val startedAt: Long = 0, val finishedAt: Long = 0)
+data class InstallItem(
+    val pkg: ApkPackage,
+    val status: InstallStatus = InstallStatus.Queued,
+    val startedAt: Long = 0,
+    val finishedAt: Long = 0,
+    /** Was mid-install when the connection dropped; resumes on its own when the watch is back. */
+    val interrupted: Boolean = false,
+)
 
 data class InstallOptions(
     val downgrade: Boolean = false,
@@ -59,20 +66,123 @@ object Installer {
 
     fun add(pkgs: List<ApkPackage>) {
         _items.update { it + pkgs.map { p -> InstallItem(p) } }
+        save()
     }
 
     fun remove(id: Long) {
+        val gone = _items.value.filter { it.pkg.id == id && !it.status.active }
         _items.update { list -> list.filterNot { it.pkg.id == id && !it.status.active } }
+        gone.forEach { deleteFiles(it.pkg) }
+        save()
     }
 
     fun clearFinished() {
+        val gone = _items.value.filter { it.status == InstallStatus.Done || it.status is InstallStatus.Failed }
         _items.update { list -> list.filter { it.status == InstallStatus.Queued || it.status.active } }
+        gone.forEach { deleteFiles(it.pkg) }
+        save()
     }
 
     fun retry(id: Long) {
-        set(id) { it.copy(status = InstallStatus.Queued) }
+        set(id) { it.copy(status = InstallStatus.Queued, interrupted = false) }
+        save()
         start()
     }
+
+    /** After the watch reconnects: carry on with anything a dropped connection interrupted. */
+    fun resumeInterrupted() {
+        if (_items.value.any { it.interrupted && it.status == InstallStatus.Queued }) start()
+    }
+
+    // --------------------------------------------------------------- queue memory
+
+    private fun queueFile(): File? = appContext?.let { File(it.filesDir, "install_queue.json") }
+
+    /** Bundled files (the watch helper) live in cache; never delete those, and never delete outside our folders. */
+    private fun deleteFiles(p: ApkPackage) {
+        val ctx = appContext ?: return
+        val root = File(ctx.filesDir, "incoming").absolutePath
+        p.files.mapNotNull { it.parentFile }.distinct()
+            .filter { it.absolutePath.startsWith(root) && it.absolutePath != root }
+            .forEach { runCatching { it.deleteRecursively() } }
+    }
+
+    /** Write the queue to disk (not progress, just what's in it and how each one ended). */
+    private fun save() {
+        val f = queueFile() ?: return
+        val snapshot = _items.value
+        scope.launch {
+            runCatching {
+                val arr = org.json.JSONArray()
+                for (item in snapshot) {
+                    val p = item.pkg
+                    // Keep the icon next to the APK so it survives a restart.
+                    val dir = p.files.firstOrNull()?.parentFile
+                    val iconFile = dir?.let { File(it, "icon.png") }
+                    if (p.icon != null && iconFile != null && !iconFile.exists()) {
+                        runCatching { iconFile.outputStream().use { p.icon.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) } }
+                    }
+                    val o = org.json.JSONObject()
+                        .put("id", p.id).put("label", p.label).put("source", p.sourceName)
+                        .put("pkg", p.packageName ?: "").put("vName", p.versionName ?: "")
+                        .put("vCode", p.versionCode ?: -1).put("minSdk", p.minSdk ?: -1)
+                        .put("wear", when (p.wearApp) { true -> 1; false -> 0; null -> -1 })
+                        .put("files", org.json.JSONArray(p.files.map { it.absolutePath }))
+                        .put("icon", iconFile?.takeIf { it.exists() }?.absolutePath ?: "")
+                        .put("interrupted", item.interrupted || item.status.active)
+                    when (val st = item.status) {
+                        InstallStatus.Done -> o.put("status", "done")
+                        is InstallStatus.Failed -> o.put("status", "failed").put("msg", st.message).put("code", st.code ?: "")
+                        else -> o.put("status", "queued")
+                    }
+                    arr.put(o)
+                }
+                synchronized(this@Installer) { f.writeText(arr.toString()) }
+            }
+        }
+    }
+
+    /** Bring back the queue from the last run (call once at app start). Items whose files are gone are dropped. */
+    fun restore(context: android.content.Context) {
+        appContext = context.applicationContext
+        if (_items.value.isNotEmpty()) return
+        val f = queueFile() ?: return
+        val restored = runCatching {
+            val arr = org.json.JSONArray(f.readText())
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.getJSONObject(i)
+                val files = o.getJSONArray("files").let { a -> (0 until a.length()).map { File(a.getString(it)) } }
+                if (files.isEmpty() || files.any { !it.exists() }) return@mapNotNull null
+                val icon = o.optString("icon").takeIf { it.isNotBlank() }?.let { android.graphics.BitmapFactory.decodeFile(it) }
+                val pkg = ApkPackage(
+                    id = o.getLong("id"),
+                    label = o.optString("label", files.first().name),
+                    packageName = o.optString("pkg").ifBlank { null },
+                    versionName = o.optString("vName").ifBlank { null },
+                    versionCode = o.optLong("vCode", -1).takeIf { it >= 0 },
+                    minSdk = o.optInt("minSdk", -1).takeIf { it >= 0 },
+                    icon = icon,
+                    files = files,
+                    wearApp = when (o.optInt("wear", -1)) { 1 -> true; 0 -> false; else -> null },
+                    sourceName = o.optString("source"),
+                )
+                val status: InstallStatus = when (o.optString("status")) {
+                    "done" -> InstallStatus.Done
+                    "failed" -> InstallStatus.Failed(o.optString("msg", "Install failed"), o.optString("code").ifBlank { null })
+                    else -> InstallStatus.Queued
+                }
+                InstallItem(pkg, status, interrupted = status == InstallStatus.Queued && o.optBoolean("interrupted"))
+            }
+        }.getOrDefault(emptyList())
+        if (restored.isNotEmpty()) _items.value = restored
+        // Resume interrupted installs as soon as the link is back, even with the app in the background.
+        if (!watching) {
+            watching = true
+            scope.launch { Adb.link.collect { if (it is Link.Connected) resumeInterrupted() } }
+        }
+    }
+
+    private var watching = false
 
     val busy: Boolean get() = worker?.isActive == true
 
@@ -88,11 +198,20 @@ object Installer {
                 if (Adb.connected == null && node == null) break
                 _viaBluetooth.value = node != null
                 set(next.pkg.id) { it.copy(status = InstallStatus.Sending(0, next.pkg.totalBytes), startedAt = System.currentTimeMillis()) }
+                save()
                 val result = runCatching {
                     if (node != null && ctx != null) installOverBluetooth(ctx, node, next.pkg) else install(next.pkg)
                 }
+                val err = result.exceptionOrNull()
+                // Connection dropped mid-install (not a real install error): put it back and wait for the watch.
+                if (err != null && err !is InstallFailure && node == null && Adb.connected == null) {
+                    set(next.pkg.id) { it.copy(status = InstallStatus.Queued, interrupted = true) }
+                    save()
+                    break
+                }
                 set(next.pkg.id) {
                     it.copy(
+                        interrupted = false,
                         status = result.fold(
                             onSuccess = { InstallStatus.Done },
                             onFailure = { e -> (e as? InstallFailure)?.let { f -> InstallStatus.Failed(f.message ?: "Install failed", f.code) } ?: InstallStatus.Failed(e.message ?: e.javaClass.simpleName) },
@@ -105,6 +224,7 @@ object Installer {
                     runCatching { Helper.setUp() }
                 }
                 if (result.isSuccess) _installed.value++
+                save()
             }
         }
     }
