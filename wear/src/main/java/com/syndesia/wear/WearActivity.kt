@@ -21,6 +21,7 @@ import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Screenshot
+import androidx.compose.material.icons.rounded.SettingsRemote
 import androidx.compose.material.icons.rounded.Upload
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.rounded.WifiOff
@@ -121,6 +122,15 @@ private fun Home(onScreenshot: () -> Unit) {
                     icon = { Icon(Icons.Rounded.Link, contentDescription = null) },
                     secondaryLabel = { Text("Wi-Fi on, then link up") },
                     label = { Text("Connect to phone") },
+                )
+            }
+            item {
+                Button(
+                    onClick = { ctx.startActivity(Intent(ctx, RemoteActivity::class.java)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    icon = { Icon(Icons.Rounded.SettingsRemote, contentDescription = null) },
+                    secondaryLabel = { Text("Mouse, buttons, apps, typing") },
+                    label = { Text("Phone remote") },
                 )
             }
             item {

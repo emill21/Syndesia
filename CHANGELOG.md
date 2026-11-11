@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8 — 2026-11-11 · Watch remote
+
+- Phone remote on the watch: Back, Home, Recents, notifications, Quick Settings, screenshot, lock, power menu and split screen
+- Mouse: drag on the watch to move a cursor on the phone, tap to click, hold for a long press, double-tap, and turn the crown to scroll
+- Media and volume controls, plus a torch switch
+- Open any phone app from the watch, and type into the phone's selected text box
+- Turn it on in Settings › Watch remote on the phone (it's an accessibility service). Update the watch app to get the Remote screen
+
 ## 1.7.2 — 2026-11-11 · Hotspot joining fix
 
 - Fixed: the watch getting stuck joining the phone's hotspot. If it doesn't join on its own within 15 seconds, the watch now asks you to tap Connect, and Syndesia tells you on the phone

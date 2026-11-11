@@ -2,6 +2,10 @@ package com.syndesia.app.ui
 
 import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
+import androidx.compose.material.icons.rounded.SettingsRemote
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import com.syndesia.app.RemoteService
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -90,6 +94,25 @@ fun SettingsScreen(
                 LinkRow(Icons.Rounded.Watch, "Forget saved watches", "${st.saved.size} saved") { confirmForget = true }
                 LinkRow(Icons.Rounded.Key, "Reset this phone's ADB key", "Every watch will need pairing again", MaterialTheme.colorScheme.error) {
                     confirmReset = true
+                }
+            }
+        }
+
+        animatedItem(2) { SectionHeader("Watch remote") }
+        animatedItem(2) {
+            var on by remember { mutableStateOf(RemoteService.isOn()) }
+            LifecycleResumeEffect(Unit) {
+                on = RemoteService.isOn()
+                onPauseOrDispose { }
+            }
+            SectionCard {
+                LinkRow(
+                    Icons.Rounded.SettingsRemote,
+                    if (on) "Watch remote is on" else "Turn on the watch remote",
+                    if (on) "Open Remote in Syndesia on your watch to tap, scroll and press buttons on this phone."
+                    else "Settings › Accessibility › Syndesia watch remote. If Android says it's a restricted setting: App info › ⋮ › Allow restricted settings, then try again.",
+                ) {
+                    ctx.openSafely(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                 }
             }
         }

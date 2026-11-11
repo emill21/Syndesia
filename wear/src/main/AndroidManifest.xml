@@ -45,6 +45,26 @@
         </activity>
 
         <activity
+            android:name=".RemoteActivity"
+            android:exported="false"
+            android:taskAffinity="" />
+        <!-- Touchpad: no swipe-to-dismiss, so dragging right moves the cursor instead of closing. -->
+        <activity
+            android:name=".MouseActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Syndesia.NoSwipe" />
+        <activity
+            android:name=".AppsActivity"
+            android:exported="false"
+            android:taskAffinity="" />
+        <activity
+            android:name=".TypeActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".FilesActivity"
             android:exported="false"
             android:taskAffinity="" />

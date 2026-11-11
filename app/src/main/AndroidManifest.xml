@@ -25,6 +25,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- The watch remote lists this phone's apps so you can open them from the watch. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -78,6 +86,20 @@
             android:name=".LinkService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
+
+        <!-- Watch remote: lets Syndesia on the watch tap, scroll and press buttons on this phone. -->
+        <service
+            android:name=".RemoteService"
+            android:exported="false"
+            android:label="Syndesia watch remote"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/remote_accessibility" />
+        </service>
 
         <!-- Requests from Syndesia on the watch (connect, screenshot, files sent to the phone). -->
         <service

@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Syndesia</string>
+    <string name="remote_description">Lets Syndesia on your watch control this phone: move a cursor and tap, scroll, go Back or Home, open notifications, change the volume, play or pause music, turn the torch on, open apps and type. It only acts on commands from your own watch, and reads the screen only to find the text box you\'re typing into.</string>
 </resources>
