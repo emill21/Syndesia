@@ -278,9 +278,25 @@ object Installer {
             }
             set(pkg.id) { it.copy(status = InstallStatus.Installing) }
             val final = kotlinx.coroutines.withTimeoutOrNull(10 * 60_000L) {
-                outcome
-                    .onEach { rep -> if (rep?.stage == "confirm") set(pkg.id) { it.copy(status = InstallStatus.ConfirmOnWatch) } }
-                    .first { it?.stage == "installed" || it?.stage == "failed" }
+                if (pkg.packageName == Helper.PACKAGE) {
+                    // The watch app is replacing itself, so its "installed" reply usually never comes
+                    // (the old copy is stopped mid-install). Watch for the new version to answer instead.
+                    val want = pkg.versionCode ?: Long.MAX_VALUE
+                    var done: Helper.Reply? = null
+                    while (done == null) {
+                        val rep = outcome.value
+                        if (rep?.stage == "confirm") set(pkg.id) { it.copy(status = InstallStatus.ConfirmOnWatch) }
+                        if (rep?.stage == "installed" || rep?.stage == "failed") { done = rep; break }
+                        val v = Helper.watchVersion(ctx, timeoutMs = 2500)
+                        if (v != null && v >= want) { done = Helper.Reply(installId, "installed", null); break }
+                        kotlinx.coroutines.delay(2500)
+                    }
+                    done
+                } else {
+                    outcome
+                        .onEach { rep -> if (rep?.stage == "confirm") set(pkg.id) { it.copy(status = InstallStatus.ConfirmOnWatch) } }
+                        .first { it?.stage == "installed" || it?.stage == "failed" }
+                }
             }
             if (final == null) throw InstallFailure("The watch didn't say whether it installed. Check the watch for an \"Install\" prompt.", null)
             if (final.stage == "failed") throw InstallFailure(final.message ?: "Install failed on the watch", null)

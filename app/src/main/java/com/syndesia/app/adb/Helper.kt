@@ -34,6 +34,35 @@ object Helper {
     private const val PATH_WAKE = "/syndesia/wake"
     private const val PATH_RELEASE = "/syndesia/release"
     private const val PATH_HOTSPOT = "/syndesia/hotspot"
+    private const val PATH_PING = "/syndesia/ping"
+
+    /** First watch-app version that can join the phone's hotspot. */
+    const val MIN_HOTSPOT_VERSION = 9L
+
+    /** The watch app is too old (or not answering) for what was asked. */
+    class Outdated(message: String) : IOException(message)
+
+    /**
+     * Ask the watch app its version over Bluetooth. Null if it doesn't answer: not installed,
+     * or a build from before it knew how to answer (1.6.1 and older).
+     */
+    suspend fun watchVersion(context: Context, timeoutMs: Long = 6000): Long? {
+        val node = bestNode(context) ?: return null
+        val id = "p${System.nanoTime()}"
+        val replies = expect(id)
+        try {
+            val sent = withTimeoutOrNull(5000) {
+                Wearable.getMessageClient(context.applicationContext)
+                    .sendMessage(node, PATH_PING, JSONObject().put("id", id).toString().toByteArray()).await()
+            }
+            if (sent == null) return null
+            return withTimeoutOrNull(timeoutMs) { replies.first { it?.stage == "pong" } }?.message?.toLongOrNull()
+        } catch (e: Exception) {
+            return null
+        } finally {
+            forget(id)
+        }
+    }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -178,11 +207,20 @@ object Helper {
      */
     suspend fun joinHotspot(context: Context, creds: Hotspot.Credentials, onStage: (String) -> Unit): String {
         val node = bestNode(context) ?: throw IOException("Can't reach Syndesia on your watch over Bluetooth. Is the watch connected to this phone?")
+        val version = watchVersion(context)
+        if (version == null || version < MIN_HOTSPOT_VERSION) {
+            throw Outdated("Syndesia on your watch needs an update before it can join your phone's hotspot. You can update it over Bluetooth now.")
+        }
         val id = "h${System.currentTimeMillis()}"
         val replies = expect(id)
         try {
             val body = JSONObject().put("id", id).put("ssid", creds.ssid).put("pass", creds.passphrase).put("wpa3", creds.wpa3)
-            Wearable.getMessageClient(context.applicationContext).sendMessage(node, PATH_HOTSPOT, body.toString().toByteArray()).await()
+            withTimeoutOrNull(10_000) {
+                Wearable.getMessageClient(context.applicationContext).sendMessage(node, PATH_HOTSPOT, body.toString().toByteArray()).await()
+            } ?: throw IOException("Couldn't send the hotspot details to your watch over Bluetooth.")
+            // The watch says "joining" straight away; if it doesn't, it never got the message.
+            withTimeoutOrNull(10_000) { replies.first { it != null } }
+                ?: throw IOException("Your watch didn't respond. Open Syndesia on the watch once, then try again.")
             val r = withTimeoutOrNull(60_000) {
                 var last: String? = null
                 replies.first { rep ->

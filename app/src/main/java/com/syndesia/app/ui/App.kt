@@ -126,6 +126,20 @@ class SyndesiaState(private val ctx: Context) {
     var pairError by mutableStateOf<String?>(null)
     var notice by mutableStateOf<String?>(null)
 
+    /** Set when the watch app is too old for the hotspot: offer to update it over Bluetooth. */
+    var offerHelperUpdate by mutableStateOf(false)
+
+    /** Send the bundled watch app to the watch and install it (over Wi-Fi if connected, else Bluetooth). */
+    fun updateHelper(onTab: ((STab) -> Unit)? = null) {
+        scope.launch {
+            val pkg = withContext(Dispatchers.IO) { Helper.bundledApk(ctx)?.let { Apk.fromFile(ctx, it) } }
+            if (pkg == null) { notice = "The watch app isn't included in this build"; return@launch }
+            Installer.add(listOf(pkg.copy(label = "Syndesia for Wear OS")))
+            Installer.start()
+            onTab?.invoke(STab.Install)
+        }
+    }
+
     /** Progress text while connecting through the phone's hotspot (null when not doing that). */
     var hotspotStage by mutableStateOf<String?>(null)
 
@@ -259,6 +273,8 @@ class SyndesiaState(private val ctx: Context) {
                     if ((Adb.link.value as? Link.Failed)?.needsPairing == true) break
                 }
                 if (!ok) notice = "Your watch joined the hotspot, but Syndesia couldn't connect yet. On the watch, make sure Wireless debugging is on, and if it asks \"Allow wireless debugging on this network?\" tap Always allow. Then try again."
+            } catch (e: Helper.Outdated) {
+                offerHelperUpdate = true
             } catch (e: Throwable) {
                 notice = e.message ?: "Couldn't connect through the hotspot"
             } finally {
@@ -472,6 +488,23 @@ fun SyndesiaApp(onReplayTour: () -> Unit) {
     st.pairRequest?.let { req -> PairDialog(st, req, found) }
     st.connectRequest?.let { req -> ConnectDialog(st, req) }
     st.notice?.let { msg -> NoticeDialog(msg) { st.notice = null } }
+    if (st.offerHelperUpdate) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { st.offerHelperUpdate = false },
+            icon = { Icon(Icons.Rounded.Watch, null) },
+            title = { Text("Update the watch app") },
+            text = {
+                Text(
+                    "Syndesia on your watch is too old to join your phone's hotspot. Syndesia can send the new version over Bluetooth " +
+                        "(a couple of minutes), then the watch asks you to tap Install. After that, tap Connect via phone hotspot again.",
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.Button(onClick = { st.offerHelperUpdate = false; st.updateHelper { tab = it } }) { Text("Update over Bluetooth") }
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { st.offerHelperUpdate = false }) { Text("Not now") } },
+        )
+    }
     if (showWhatsNew && releases.isNotEmpty()) {
         ChangelogSheet(releases, latestOnly = true) {
             st.prefs.lastSeenVersion = BuildConfig.VERSION_CODE

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.1 — 2026-11-11 · Hotspot fix
+
+- Fixed: Connect via phone hotspot spinning forever when the watch app was too old. Syndesia now checks the watch app's version first and offers to update it
+- Update the watch app over Bluetooth, no Wi-Fi needed: from the hotspot prompt, or the watch card on the Install tab
+- Each hotspot step now gives up with a clear message instead of waiting forever
+
 ## 1.7 — 2026-11-11 · Phone hotspot
 
 - Connect via phone hotspot: one tap starts a private hotspot on your phone, your watch joins it over Bluetooth, and Syndesia connects over it. Works anywhere, no router needed

@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.7.1",
+    "date": "2026-11-11",
+    "title": "Hotspot fix",
+    "items": [
+      "Fixed: Connect via phone hotspot spinning forever when the watch app was too old. Syndesia now checks the watch app's version first and offers to update it",
+      "Update the watch app over Bluetooth, no Wi-Fi needed: from the hotspot prompt, or the watch card on the Install tab",
+      "Each hotspot step now gives up with a clear message instead of waiting forever"
+    ]
+  },
+  {
     "version": "1.7",
     "date": "2026-11-11",
     "title": "Phone hotspot",

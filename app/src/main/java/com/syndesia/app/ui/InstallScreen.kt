@@ -313,11 +313,16 @@ private fun HelperCard(st: SyndesiaState, link: Link) {
     val info = (link as? Link.Connected)?.info
     var onWatch by remember { mutableStateOf<Long?>(null) }
     var checked by remember { mutableStateOf(false) }
-    LaunchedEffect(info, installedCount) {
+    val overBt = info == null && st.helperNearby
+    LaunchedEffect(info, installedCount, overBt) {
         checked = false
         onWatch = null
         if (info != null) {
             onWatch = runCatching { Helper.installedVersion() }.getOrNull()
+            checked = true
+        } else if (overBt) {
+            // No Wi-Fi link: ask the watch app itself over Bluetooth. Old builds don't answer.
+            onWatch = Helper.watchVersion(ctx)
             checked = true
         }
     }
@@ -332,7 +337,9 @@ private fun HelperCard(st: SyndesiaState, link: Link) {
                 Text("Syndesia for your watch", style = MaterialTheme.typography.titleMedium)
                 Text(
                     when {
-                        info == null -> "Wakes the watch's Wi-Fi over Bluetooth when Syndesia can't reach it, and turns Wireless debugging back on."
+                        info == null && !overBt -> "Wakes the watch's Wi-Fi over Bluetooth when Syndesia can't reach it, and turns Wireless debugging back on."
+                        overBt && !checked -> "Asking the watch over Bluetooth…"
+                        overBt && onWatch == null -> "Couldn't tell which version is on the watch (older versions don't say). Updating over Bluetooth is safe."
                         !checked -> "Checking the watch…"
                         onWatch == null -> "Not on this watch yet. Wakes its Wi-Fi over Bluetooth and turns Wireless debugging back on."
                         upToDate -> "Installed and set up. Syndesia wakes your watch's Wi-Fi when it needs to."
@@ -347,6 +354,7 @@ private fun HelperCard(st: SyndesiaState, link: Link) {
             if (upToDate) Pill("Installed", Icons.Rounded.CheckCircle, colors.primaryContainer, colors.onPrimaryContainer)
             Spacer(Modifier.weight(1f))
             val label = when {
+                overBt && !upToDate -> "Update over Bluetooth"
                 onWatch == null -> "Install on watch"
                 upToDate -> "Reinstall"
                 else -> "Update"
@@ -358,15 +366,15 @@ private fun HelperCard(st: SyndesiaState, link: Link) {
                     else { Installer.add(listOf(pkg.copy(label = "Syndesia for Wear OS"))); Installer.start() }
                 }
             }
-            if (upToDate) OutlinedButton(onClick = action, enabled = info != null && !busy) { Text(label) }
-            else Button(onClick = action, enabled = info != null && !busy) {
+            if (upToDate) OutlinedButton(onClick = action, enabled = (info != null || overBt) && !busy) { Text(label) }
+            else Button(onClick = action, enabled = (info != null || overBt) && !busy) {
                 if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = colors.onPrimary)
                 else Icon(Icons.Rounded.Upload, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
                 Text(label)
             }
         }
-        if (info == null) Text(
+        if (info == null && !overBt) Text(
             "Connect over Wi-Fi once to install it.",
             style = MaterialTheme.typography.labelMedium,
             color = colors.onSurfaceVariant,
