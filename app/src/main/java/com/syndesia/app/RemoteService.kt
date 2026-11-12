@@ -179,7 +179,8 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
             for (d in 0..9) {
                 val k = d.toString()
                 if (out.containsKey(k)) continue
-                r.findAccessibilityNodeInfosByViewId("com.android.systemui:id/key$d").firstOrNull()?.let { out[k] = it; continue }
+                val byId = r.findAccessibilityNodeInfosByViewId("com.android.systemui:id/key$d").firstOrNull()
+                if (byId != null) { out[k] = byId; continue }
                 r.findAccessibilityNodeInfosByText(k).firstOrNull { n ->
                     n.packageName == "com.android.systemui" && (n.text?.toString()?.trim() == k || n.contentDescription?.toString()?.trim()?.startsWith(k) == true)
                 }?.let { out[k] = it }
