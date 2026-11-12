@@ -104,5 +104,6 @@ dependencies {
 
     // Bluetooth messages to the watch helper (wake its Wi-Fi).
     implementation("com.google.android.gms:play-services-wearable:19.0.0")
+    implementation(project(":hid"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 }

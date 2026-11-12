@@ -87,6 +87,12 @@
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
 
+        <!-- Backup computer mouse: the phone acts as the Bluetooth mouse for the watch's touchpad. -->
+        <service
+            android:name=".HidRelayService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
         <!-- Watch remote: lets Syndesia on the watch tap, scroll and press buttons on this phone. -->
         <service
             android:name=".RemoteService"

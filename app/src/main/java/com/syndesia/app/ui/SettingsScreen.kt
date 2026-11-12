@@ -1,7 +1,20 @@
 package com.syndesia.app.ui
 
 import android.content.Intent
+import android.Manifest
+import android.bluetooth.BluetoothAdapter
 import android.net.Uri
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.rounded.Bluetooth
+import androidx.compose.material.icons.rounded.BluetoothSearching
+import androidx.compose.material.icons.rounded.Computer
+import androidx.compose.material.icons.rounded.Mouse
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.syndesia.app.HidRelayService
+import com.syndesia.hid.HidMouse
 import android.provider.Settings
 import androidx.compose.material.icons.rounded.SettingsRemote
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -117,6 +130,9 @@ fun SettingsScreen(
             }
         }
 
+        animatedItem(2) { SectionHeader("Computer mouse") }
+        animatedItem(2) { ComputerMouseCard() }
+
         animatedItem(2) { SectionHeader("Installing") }
         animatedItem(2) {
             SectionCard {
@@ -157,4 +173,65 @@ fun SettingsScreen(
         onConfirm = { Keys.reset(ctx); Adb.resetIdentity() },
         onDismiss = { confirmReset = false },
     )
+}
+
+/**
+ * Backup for watches that can't be a Bluetooth mouse: this phone becomes the mouse, and the
+ * watch's touchpad drives it.
+ */
+@Composable
+private fun ComputerMouseCard() {
+    val ctx = LocalContext.current
+    val status by HidMouse.status.collectAsStateWithLifecycle()
+    val host by HidMouse.host.collectAsStateWithLifecycle()
+    var granted by remember { mutableStateOf(HidRelayService.hasPermission(ctx)) }
+    var running by remember { mutableStateOf(HidRelayService.running) }
+    var refresh by remember { mutableIntStateOf(0) }
+    LifecycleResumeEffect(Unit) {
+        granted = HidRelayService.hasPermission(ctx)
+        running = HidRelayService.running
+        refresh++
+        onPauseOrDispose { }
+    }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
+        granted = r.values.all { it }
+    }
+    val discoverable = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { refresh++ }
+    val paired = remember(refresh, status, granted) { if (granted) HidMouse.paired(ctx).filter { it.isComputer } else emptyList() }
+
+    SectionCard {
+        Text(
+            "Your watch can be a Bluetooth mouse for your computer on its own (Computer mouse on the watch). " +
+                "If your watch can't, this phone can be the mouse instead and the watch's touchpad drives it.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+        )
+        if (!granted && Build.VERSION.SDK_INT >= 31) {
+            LinkRow(Icons.Rounded.Bluetooth, "Allow Nearby devices", "Needed to act as a Bluetooth mouse") {
+                ask.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE))
+            }
+            return@SectionCard
+        }
+        val label = when {
+            !running -> "Start phone mouse"
+            status == HidMouse.Status.Connected -> "Mouse for ${host?.name}"
+            status == HidMouse.Status.Unsupported -> "This phone can't be a Bluetooth mouse"
+            else -> "Phone mouse is on"
+        }
+        LinkRow(
+            Icons.Rounded.Mouse, label,
+            if (running) "Tap to stop" else "Then use Computer mouse › Use your phone on the watch",
+        ) {
+            if (running) { HidRelayService.stop(ctx); running = false } else running = HidRelayService.start(ctx)
+        }
+        if (running && status != HidMouse.Status.Connected) {
+            paired.forEach { h ->
+                LinkRow(Icons.Rounded.Computer, "Connect to ${h.name}", "Paired computer") { HidMouse.connect(ctx, h.address) }
+            }
+            LinkRow(Icons.Rounded.BluetoothSearching, "Pair a computer", "Makes this phone visible; then add it in the computer's Bluetooth settings") {
+                discoverable.launch(Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120))
+            }
+        }
+    }
 }

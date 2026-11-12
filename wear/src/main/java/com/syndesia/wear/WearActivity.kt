@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Link
@@ -131,6 +132,15 @@ private fun Home(onScreenshot: () -> Unit) {
                     icon = { Icon(Icons.Rounded.SettingsRemote, contentDescription = null) },
                     secondaryLabel = { Text("Mouse, buttons, apps, typing") },
                     label = { Text("Phone remote") },
+                )
+            }
+            item {
+                FilledTonalButton(
+                    onClick = { ctx.startActivity(Intent(ctx, ComputerActivity::class.java)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    icon = { Icon(Icons.Rounded.Computer, contentDescription = null) },
+                    secondaryLabel = { Text("Bluetooth mouse + keyboard") },
+                    label = { Text("Computer mouse") },
                 )
             }
             item {

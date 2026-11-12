@@ -38,6 +38,21 @@ class PhoneListener : WearableListenerService() {
         when (event.path) {
             "/syndesia/connect" -> FromWatch.connect(this, event.sourceNodeId, body.optString("ip"))
             "/syndesia/screenshot" -> FromWatch.screenshot(this, event.sourceNodeId, body.optInt("delay", 5), body.optString("ip"))
+            "/syndesia/hidrelay/start" -> {
+                HidRelayService.setNode(event.sourceNodeId)
+                when {
+                    !HidRelayService.hasPermission(this) -> HidRelayService.reply(
+                        this, "not_ready", null,
+                        "On your phone, open Syndesia › Settings › Computer mouse and allow Nearby devices.",
+                    )
+                    HidRelayService.running -> HidRelayService.start(this)
+                    !HidRelayService.start(this) -> HidRelayService.reply(
+                        this, "not_ready", null,
+                        "Open Syndesia on your phone once (Settings › Computer mouse › Start), then try again.",
+                    )
+                }
+            }
+            "/syndesia/hidrelay/stop" -> HidRelayService.stop(this)
         }
     }
 

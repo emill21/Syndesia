@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9 — 2026-11-11 · Computer mouse
+
+- Computer mouse: your watch becomes a Bluetooth mouse and keyboard for your computer. Pair it once like any wireless mouse, nothing to install on the computer
+- Touchpad: drag to move, tap to click, hold then drag to select or move things, crown scrolls, and a right-click button
+- Keyboard: type from the watch, plus Enter, Backspace, Tab, Esc, arrow keys, and copy, paste, undo, select all and Alt+Tab
+- Backup: if your watch can't be a Bluetooth mouse, your phone can be, with the watch driving it (Settings › Computer mouse on the phone)
+- Update the watch app from the Install tab to get it
+
 ## 1.8.3 — 2026-11-11 · Hotspot connect fix
 
 - Fixed: the watch joining the phone's hotspot but Syndesia not connecting. Syndesia now searches the watch for its debugging port directly, since the watch's usual announcement doesn't reach the phone over its own hotspot

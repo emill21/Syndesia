@@ -45,6 +45,25 @@
         </activity>
 
         <activity
+            android:name=".ComputerActivity"
+            android:exported="false"
+            android:taskAffinity="" />
+        <activity
+            android:name=".ComputerPadActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Syndesia.NoSwipe" />
+        <activity
+            android:name=".ComputerKeysActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:windowSoftInputMode="adjustResize" />
+        <service
+            android:name=".MouseKeeper"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
+        <activity
             android:name=".RemoteActivity"
             android:exported="false"
             android:taskAffinity="" />

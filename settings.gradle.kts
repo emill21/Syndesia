@@ -15,4 +15,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "Syndesia"
-include(":app", ":wear")
+include(":app", ":wear", ":hid")

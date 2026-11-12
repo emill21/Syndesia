@@ -68,5 +68,6 @@ dependencies {
     implementation("androidx.wear.compose:compose-foundation:1.5.0")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("com.google.android.gms:play-services-wearable:19.0.0")
+    implementation(project(":hid"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 }
