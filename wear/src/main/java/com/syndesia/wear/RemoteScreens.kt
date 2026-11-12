@@ -410,7 +410,7 @@ private fun Touchpad(onClose: () -> Unit) {
     }
 }
 
-/** Wakes the phone and has it type its saved PIN. Only works while this watch has a screen lock. */
+/** Wakes the phone and has it type its saved PIN. */
 @Composable
 private fun UnlockButton() {
     val ctx = LocalContext.current
@@ -436,10 +436,7 @@ private fun UnlockButton() {
     }
     FilledTonalButton(
         onClick = {
-            val km = ctx.getSystemService(android.app.KeyguardManager::class.java)
-            if (km?.isDeviceSecure != true) {
-                Toast.makeText(ctx, "Set a screen lock on this watch first, so only you can unlock your phone", Toast.LENGTH_LONG).show()
-            } else if (!waiting) {
+            if (!waiting) {
                 waiting = true
                 Remote.requestUnlock(ctx)
             }

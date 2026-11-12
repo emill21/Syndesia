@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.11.1 — 2026-11-12 · Unlock without a watch lock
+
+- Unlock phone no longer needs your watch to have a screen lock
+- Update both the phone app and the watch app to get this
+
 ## 1.11 — 2026-11-11 · Unlock from watch
 
 - Unlock phone: a new button in the watch remote wakes your phone and types its PIN on the lock screen

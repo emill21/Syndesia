@@ -263,7 +263,7 @@ private fun UnlockPinRow() {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Anyone with your unlocked watch will be able to unlock this phone. The watch has to be unlocked (on your wrist) for the button to work. Enter the same PIN you use on the lock screen; a wrong one is tried only once.",
+                        "Anyone holding your watch will be able to unlock this phone. Enter the same PIN you use on the lock screen; a wrong one is tried only once.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     val kb = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword)

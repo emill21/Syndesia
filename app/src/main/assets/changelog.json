@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.11.1",
+    "date": "2026-11-12",
+    "title": "Unlock without a watch lock",
+    "items": [
+      "Unlock phone no longer needs your watch to have a screen lock",
+      "Update both the phone app and the watch app to get this"
+    ]
+  },
+  {
     "version": "1.11",
     "date": "2026-11-11",
     "title": "Unlock from watch",
