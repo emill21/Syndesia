@@ -47,6 +47,7 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Screenshot
 import androidx.compose.material.icons.rounded.Sensors
+import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Tune
@@ -143,6 +144,7 @@ private fun Panel() {
                 }
             }
             item { UnlockButton() }
+            item { PrivateSpaceButton() }
             item {
                 Button(
                     onClick = { ctx.startActivity(Intent(ctx, MouseActivity::class.java)) },
@@ -448,6 +450,40 @@ private fun UnlockButton() {
         icon = { Icon(Icons.Rounded.LockOpen, contentDescription = null) },
         secondaryLabel = { Text(if (waiting) "Unlocking…" else "Types your PIN") },
         label = { Text("Unlock phone") },
+    )
+}
+
+/** Opens Private space on the phone (app drawer › Private), typing the PIN if it asks. */
+@Composable
+private fun PrivateSpaceButton() {
+    val ctx = LocalContext.current
+    val result by Remote.privateSpace.collectAsStateWithLifecycle()
+    var waiting by remember { mutableStateOf(false) }
+    LaunchedEffect(result, waiting) {
+        if (!waiting) return@LaunchedEffect
+        val r = result
+        if (r == null) {
+            delay(15_000)
+            if (Remote.privateSpace.value == null) { waiting = false; Toast.makeText(ctx, "Phone didn't answer", Toast.LENGTH_SHORT).show() }
+            return@LaunchedEffect
+        }
+        waiting = false
+        val msg = when (r) {
+            "opened" -> "Private space opened"
+            "locked" -> "Unlock your phone first"
+            "notfound" -> "Couldn't find Private space in the app list. If it's hidden, turn off Hide when locked in its settings"
+            "needpin" -> "Private space wants your PIN. Save it in Syndesia › Settings on your phone, or use your fingerprint"
+            "unsupported" -> "Private space needs Android 15 or newer"
+            else -> "Couldn't open Private space"
+        }
+        Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+    }
+    FilledTonalButton(
+        onClick = { if (!waiting) { waiting = true; Remote.openPrivateSpace(ctx) } },
+        modifier = Modifier.fillMaxWidth(),
+        icon = { Icon(Icons.Rounded.Shield, contentDescription = null) },
+        secondaryLabel = { Text(if (waiting) "Opening…" else "On your phone") },
+        label = { Text("Private space") },
     )
 }
 

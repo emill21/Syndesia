@@ -114,6 +114,7 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
             "type" -> reply(node, JSONObject().put("type", "typed").put("ok", type(o.optString("text"), o.optBoolean("enter"))))
             "backspace" -> backspace()
             "unlock" -> unlock(node)
+            "private" -> openPrivateSpace(node)
         }
     }
 
@@ -162,9 +163,10 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
                 pinKeys()?.let { return type(it) }
                 val t = SystemClock.uptimeMillis() - started
                 if (!swiped && t > 300) {
-                    // Swipe up on the lock screen, like you would, to bring up the PIN pad.
+                    // Swipe up from the very bottom edge, like you would, to bring up the PIN pad.
+                    // (Starting higher lands on the under-screen fingerprint sensor, which eats the swipe.)
                     swiped = true
-                    swipe(screenW / 2f, screenH * 0.85f, screenW / 2f, screenH * 0.3f, 220)
+                    swipe(screenW / 2f, screenH - 6f, screenW / 2f, screenH * 0.35f, 260)
                 } else if (!asked && t > 1600) {
                     // Swipe didn't do it: ask Android to show the PIN pad.
                     asked = true
@@ -174,6 +176,99 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
             }
         }
         main.postDelayed(find, if (screenWasOff) 450 else 50)
+    }
+
+    // --------------------------------------------------------------- private space
+
+    /**
+     * Opens Private space the way you would: the app drawer, scroll to the bottom, tap Private.
+     * If it asks for the PIN (not just a fingerprint), types the saved one.
+     */
+    private fun openPrivateSpace(node: String) {
+        fun done(why: String) = reply(node, JSONObject().put("type", "private").put("why", why))
+        if (Build.VERSION.SDK_INT < 35) return done("unsupported")
+        val km = getSystemService(android.app.KeyguardManager::class.java)
+        if (km.isKeyguardLocked) return done("locked")
+        performGlobalAction(GLOBAL_ACTION_HOME)
+        main.postDelayed({
+            if (!performGlobalAction(GLOBAL_ACTION_ACCESSIBILITY_ALL_APPS)) {
+                swipe(screenW / 2f, screenH * 0.7f, screenW / 2f, screenH * 0.2f, 250)
+            }
+            var tries = 0
+            val look = object : Runnable {
+                override fun run() {
+                    val root = rootInActiveWindow
+                    val tile = root?.let { findPrivateTile(it) }
+                    if (tile != null) {
+                        clickNode(tile)
+                        main.postDelayed({ privateAuth(node, 0) }, 700)
+                        return
+                    }
+                    if (++tries > 16) return done("notfound")
+                    // Scroll the app list down toward the bottom, where Private space sits.
+                    val list = root?.let { findScrollable(it) }
+                    if (list == null || !list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) {
+                        swipe(screenW / 2f, screenH * 0.75f, screenW / 2f, screenH * 0.25f, 180)
+                    }
+                    main.postDelayed(this, 280)
+                }
+            }
+            main.postDelayed(look, 650)
+        }, 350)
+    }
+
+    private fun findPrivateTile(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val stack = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+        while (stack.isNotEmpty()) {
+            val n = stack.removeLast()
+            val label = listOfNotNull(n.text, n.contentDescription).joinToString(" ").lowercase()
+            if (n.isVisibleToUser && (label == "private" || label.startsWith("private space") || label.startsWith("private,") || label == "private, locked" || label.contains("unlock private"))) return n
+            for (i in 0 until n.childCount) n.getChild(i)?.let { stack.add(it) }
+        }
+        return null
+    }
+
+    private fun findScrollable(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        var best: AccessibilityNodeInfo? = null
+        var bestArea = 0
+        val r = android.graphics.Rect()
+        val stack = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+        while (stack.isNotEmpty()) {
+            val n = stack.removeLast()
+            if (n.isScrollable && n.isVisibleToUser) {
+                n.getBoundsInScreen(r)
+                val a = r.width() * r.height()
+                if (a > bestArea) { bestArea = a; best = n }
+            }
+            for (i in 0 until n.childCount) n.getChild(i)?.let { stack.add(it) }
+        }
+        return best
+    }
+
+    /** After tapping Private: if a PIN pad (or a "Use PIN" button) shows up, type the saved PIN once. */
+    private fun privateAuth(node: String, step: Int) {
+        fun done(why: String) = reply(node, JSONObject().put("type", "private").put("why", why))
+        val pin = PinVault.load(this)
+        val keys = pinKeys(anyPackage = true)
+        if (keys != null) {
+            if (pin.isNullOrEmpty()) return done("needpin")
+            return typePin(pin, keys, lockScreen = false) { done(if (it) "opened" else "auth") }
+        }
+        if (step == 0 || step == 4) {
+            // Fingerprint prompt: switch it to the PIN so we can type it.
+            val usePin = rootsNow().firstNotNullOfOrNull { r ->
+                r.findAccessibilityNodeInfosByText("Use PIN").firstOrNull()
+                    ?: r.findAccessibilityNodeInfosByText("Use password").firstOrNull()
+            }
+            if (usePin != null && !pin.isNullOrEmpty()) clickNode(usePin)
+        }
+        if (step > 12) return done("opened") // no PIN needed, or you used your fingerprint
+        main.postDelayed({ privateAuth(node, step + 1) }, 250)
+    }
+
+    private fun rootsNow(): List<AccessibilityNodeInfo> = buildList {
+        runCatching { windows.forEach { w -> w.root?.let { add(it) } } }
+        rootInActiveWindow?.let { add(it) }
     }
 
     /** Turns the screen on; with [dismiss], also asks Android to bring up the PIN pad. */
@@ -198,7 +293,7 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
     }
 
     /** The lock screen's digit keys 0–9 (and Enter, if it has one), or null if the PIN pad isn't showing. */
-    private fun pinKeys(): Map<String, AccessibilityNodeInfo>? {
+    private fun pinKeys(anyPackage: Boolean = false): Map<String, AccessibilityNodeInfo>? {
         val roots = buildList {
             runCatching { windows.forEach { w -> w.root?.let { add(it) } } }
             if (Build.VERSION.SDK_INT >= 30) runCatching {
@@ -210,7 +305,8 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
         val out = HashMap<String, AccessibilityNodeInfo>()
         var count = 0
         for (r in roots) {
-            if (r.packageName?.toString() != "com.android.systemui") continue
+            val pkg = r.packageName?.toString()
+            if (pkg != "com.android.systemui" && !(anyPackage && pkg == "com.android.settings")) continue
             val stack = ArrayDeque<AccessibilityNodeInfo>().apply { add(r) }
             while (stack.isNotEmpty()) {
                 val n = stack.removeLast()
@@ -239,14 +335,14 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
         return true
     }
 
-    private fun typePin(pin: String, keys: Map<String, AccessibilityNodeInfo>, then: (Boolean) -> Unit) {
+    private fun typePin(pin: String, keys: Map<String, AccessibilityNodeInfo>, lockScreen: Boolean = true, then: (Boolean) -> Unit) {
         val seq = pin.map { it.toString() } + (if (keys.containsKey("enter")) listOf("enter") else emptyList())
         var i = 0
         val step = object : Runnable {
             override fun run() {
                 if (i >= seq.size) return then(true)
                 // Auto-confirm PINs unlock on the last digit; don't tap anything after that.
-                if (!getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked) return then(true)
+                if (lockScreen && !getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked) return then(true)
                 val n = keys[seq[i]] ?: return then(false)
                 if (!clickNode(n)) return then(false)
                 i++

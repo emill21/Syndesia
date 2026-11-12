@@ -8,7 +8,11 @@ import com.google.android.gms.wearable.WearableListenerService
 class WakeListener : WearableListenerService() {
     override fun onMessageReceived(event: MessageEvent) {
         when (event.path) {
-            PATH_WAKE -> WifiKeeper.start(this)
+            PATH_WAKE -> {
+                val started = WifiKeeper.start(this)
+                runCatching { org.json.JSONObject(String(event.data, Charsets.UTF_8)).getString("id") }.getOrNull()
+                    ?.let { WifiReport.watch(this, event.sourceNodeId, it, started) }
+            }
             PATH_RELEASE -> WifiHold.release(this)
             Phone.PATH_REPLY -> Phone.onReply(event.data)
             "/syndesia/hidrelay" -> Pointer.onPhoneReply(event.data)

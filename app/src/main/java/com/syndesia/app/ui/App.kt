@@ -309,9 +309,17 @@ class SyndesiaState(private val ctx: Context) {
     /** Manual "wake the watch's Wi-Fi" from the Watch tab. */
     fun wakeWatch() {
         scope.launch {
-            val n = Helper.wake(ctx)
-            notice = if (n > 0) "Asked your watch to turn on Wi-Fi and Wireless debugging. It should show up under On this Wi-Fi in a few seconds."
-            else "Couldn't reach Syndesia on your watch over Bluetooth. Make sure the watch is connected to this phone and the helper is installed (Install tab)."
+            notice = "Asking your watch to turn on Wi-Fi…"
+            val r = Helper.wakeAndWait(ctx)
+            notice = when {
+                r == null -> "Couldn't reach Syndesia on your watch over Bluetooth. Make sure the watch is connected to this phone and the helper is installed (Install tab)."
+                r.stage == "noreply" -> "Your watch got the message but didn't answer. Update Syndesia on the watch (Install tab, over Bluetooth) and try again."
+                r.stage == "on" && r.message == "debugging" -> "Your watch's Wi-Fi is on. It should show up under On this Wi-Fi in a few seconds."
+                r.stage == "on" -> "Your watch's Wi-Fi is on, but Wireless debugging is off. On the watch: Settings › Developer options › Wireless debugging."
+                r.message == "wifi_off" -> "Your watch's Wi-Fi is switched off, and apps aren't allowed to switch it on. Tap the notification on your watch, or try Connect with phone hotspot."
+                r.message == "nofgs" -> "Android on your watch stopped Syndesia from starting in the background. Open Syndesia on the watch and tap Connect to phone, or use Connect with phone hotspot."
+                else -> "Your watch's Wi-Fi turned on but found no saved network nearby. Try Connect with phone hotspot, or tap the notification on your watch to pick a network."
+            }
         }
     }
 

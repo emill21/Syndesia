@@ -98,6 +98,28 @@ object Helper {
         return send(context, PATH_WAKE)
     }
 
+    /**
+     * Manual wake that waits for the watch to say what happened. Returns the watch's final reply
+     * ("on" / "off" with a reason), a Reply with stage "noreply" if an older watch app didn't answer,
+     * or null if no watch is reachable over Bluetooth.
+     */
+    suspend fun wakeAndWait(context: Context): Reply? {
+        val node = bestNode(context) ?: return null
+        lastWake = System.currentTimeMillis()
+        val id = "w${System.currentTimeMillis()}"
+        val replies = expect(id)
+        try {
+            val body = JSONObject().put("id", id).toString().toByteArray()
+            withTimeoutOrNull(8000) { Wearable.getMessageClient(context.applicationContext).sendMessage(node, PATH_WAKE, body).await() }
+                ?: return null
+            withTimeoutOrNull(8000) { replies.first { it != null } } ?: return Reply(id, "noreply", null)
+            return withTimeoutOrNull(32_000) { replies.first { it?.stage == "on" || it?.stage == "off" } }
+                ?: Reply(id, "off", "no_network")
+        } finally {
+            forget(id)
+        }
+    }
+
     /** Fire-and-forget wake, at most every 20 s unless [force]. */
     fun wakeAsync(context: Context, force: Boolean = false) {
         if (!force && System.currentTimeMillis() - lastWake < 20_000) return

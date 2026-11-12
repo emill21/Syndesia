@@ -67,12 +67,14 @@ class WifiKeeper : Service() {
         private const val CHANNEL = "wifi"
         private const val ACTION_STOP = "com.syndesia.wear.STOP"
 
-        fun start(context: Context) {
+        /** False if Android wouldn't let the keeper start from the background. */
+        fun start(context: Context): Boolean {
             val i = Intent(context, WifiKeeper::class.java)
-            runCatching { context.startForegroundService(i) }
+            return runCatching { context.startForegroundService(i) }
                 // Not allowed to start from the background (no allowlist yet): hold Wi-Fi anyway,
                 // for as long as the process lives.
                 .onFailure { WifiHold.acquire(context) }
+                .isSuccess
         }
 
         fun stop(context: Context) {

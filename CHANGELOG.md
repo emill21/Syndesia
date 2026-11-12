@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.12 — 2026-11-12 · Private space
+
+- Private space: a new button in the watch remote opens Private space on your phone. It opens the app list, scrolls to Private and taps it, and types your saved PIN if it asks (or use your fingerprint)
+- Unlock phone: the swipe now starts at the very bottom edge, so it no longer lands on the fingerprint sensor and stops
+- Wake watch Wi-Fi: the watch now reports back what actually happened. Syndesia tells you if Wi-Fi came on, if it's switched off on the watch (with a notification on the watch to turn it on), or if there's no saved network nearby
+- Wake watch Wi-Fi asks for any Wi-Fi network, not only ones with internet, so the watch brings Wi-Fi up more readily
+- Update both the phone app and the watch app to get this
+
 ## 1.11.2 — 2026-11-12 · Unlock fix
 
 - Fixed: Unlock phone saying it couldn't find the PIN pad. Android hides the PIN pad from ordinary accessibility services; the watch remote is now declared as an accessibility tool so it can see and press the keys

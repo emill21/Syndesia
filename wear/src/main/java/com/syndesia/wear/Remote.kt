@@ -41,6 +41,14 @@ object Remote {
     private val _unlock = MutableStateFlow<String?>(null)
     val unlock: StateFlow<String?> = _unlock.asStateFlow()
 
+    private val _privateSpace = MutableStateFlow<String?>(null)
+    val privateSpace: StateFlow<String?> = _privateSpace.asStateFlow()
+
+    fun openPrivateSpace(ctx: Context) {
+        _privateSpace.value = null
+        send(ctx, "private")
+    }
+
     fun requestUnlock(ctx: Context) {
         _unlock.value = null
         send(ctx, "unlock")
@@ -65,6 +73,7 @@ object Remote {
             }
             "torch" -> _torch.value = o.optBoolean("on")
             "typed" -> _typed.value = o.optBoolean("ok")
+            "private" -> _privateSpace.value = o.optString("why", "opened")
             "unlocked" -> _unlock.value = o.optString("why", if (o.optBoolean("ok")) "unlocked" else "failed").let { w ->
                 if (w == "nopad") "nopad:" + o.optInt("seen") else w
             }

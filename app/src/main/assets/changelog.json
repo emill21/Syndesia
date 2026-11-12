@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.12",
+    "date": "2026-11-12",
+    "title": "Private space",
+    "items": [
+      "Private space: a new button in the watch remote opens Private space on your phone. It opens the app list, scrolls to Private and taps it, and types your saved PIN if it asks (or use your fingerprint)",
+      "Unlock phone: the swipe now starts at the very bottom edge, so it no longer lands on the fingerprint sensor and stops",
+      "Wake watch Wi-Fi: the watch now reports back what actually happened. Syndesia tells you if Wi-Fi came on, if it's switched off on the watch (with a notification on the watch to turn it on), or if there's no saved network nearby",
+      "Wake watch Wi-Fi asks for any Wi-Fi network, not only ones with internet, so the watch brings Wi-Fi up more readily",
+      "Update both the phone app and the watch app to get this"
+    ]
+  },
+  {
     "version": "1.11.2",
     "date": "2026-11-12",
     "title": "Unlock fix",

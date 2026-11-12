@@ -65,7 +65,6 @@ object WifiHold {
         }
         val request = NetworkRequest.Builder()
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .build()
         runCatching {
             cm.requestNetwork(request, cb)
