@@ -65,7 +65,9 @@ object Remote {
             }
             "torch" -> _torch.value = o.optBoolean("on")
             "typed" -> _typed.value = o.optBoolean("ok")
-            "unlocked" -> _unlock.value = o.optString("why", if (o.optBoolean("ok")) "unlocked" else "failed")
+            "unlocked" -> _unlock.value = o.optString("why", if (o.optBoolean("ok")) "unlocked" else "failed").let { w ->
+                if (w == "nopad") "nopad:" + o.optInt("seen") else w
+            }
         }
     }
 

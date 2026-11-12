@@ -120,6 +120,7 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
     // --------------------------------------------------------------- unlock with PIN
 
     private var unlocking = false
+    private var seen = 0
 
     /**
      * Wakes the phone, brings up the PIN pad and types the saved PIN, once. Never retries, so a
@@ -128,69 +129,103 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
     private fun unlock(node: String) {
         fun done(ok: Boolean, why: String) {
             unlocking = false
-            reply(node, JSONObject().put("type", "unlocked").put("ok", ok).put("why", why))
+            reply(node, JSONObject().put("type", "unlocked").put("ok", ok).put("why", why).put("seen", seen))
         }
         val km = getSystemService(android.app.KeyguardManager::class.java)
+        val pm = getSystemService(android.os.PowerManager::class.java)
         if (!km.isKeyguardLocked) {
-            wake()
+            if (!pm.isInteractive) wake(false)
             return done(true, "already")
         }
         if (unlocking) return
+        if (!km.isDeviceSecure) { wake(true); return done(true, "nopin") }
         val pin = PinVault.load(this)
-        if (!km.isDeviceSecure) {
-            // Swipe-only lock screen: nothing to type.
-            wake(); return done(true, "nopin")
-        }
         if (pin.isNullOrEmpty()) return done(false, "nopin_saved")
         unlocking = true
-        wake()
+
+        fun type(keys: Map<String, AccessibilityNodeInfo>) = typePin(pin, keys) { entered ->
+            if (!entered) return@typePin done(false, "nopad")
+            main.postDelayed({ done(!km.isKeyguardLocked, if (km.isKeyguardLocked) "wrong" else "unlocked") }, 900)
+        }
+
+        // PIN pad already open? Type straight away (opening anything on top would close it).
+        pinKeys()?.let { return type(it) }
+
+        val screenWasOff = !pm.isInteractive
+        if (screenWasOff) wake(false)
         val started = SystemClock.uptimeMillis()
+        var swiped = false
+        var asked = false
         val find = object : Runnable {
             override fun run() {
                 if (!km.isKeyguardLocked) return done(true, "unlocked") // Watch Unlock / face got there first
-                val keys = pinKeys()
-                if (keys == null) {
-                    if (SystemClock.uptimeMillis() - started > 4000) return done(false, "nopad")
-                    main.postDelayed(this, 150); return
-                }
-                typePin(pin, keys) { entered ->
-                    if (!entered) return@typePin done(false, "nopad")
-                    main.postDelayed({ done(!km.isKeyguardLocked, if (km.isKeyguardLocked) "wrong" else "unlocked") }, 900)
-                }
+                pinKeys()?.let { return type(it) }
+                val t = SystemClock.uptimeMillis() - started
+                if (!swiped && t > 300) {
+                    // Swipe up on the lock screen, like you would, to bring up the PIN pad.
+                    swiped = true
+                    swipe(screenW / 2f, screenH * 0.85f, screenW / 2f, screenH * 0.3f, 220)
+                } else if (!asked && t > 1600) {
+                    // Swipe didn't do it: ask Android to show the PIN pad.
+                    asked = true
+                    wake(true)
+                } else if (t > 5000) return done(false, "nopad")
+                main.postDelayed(this, 150)
             }
         }
-        main.postDelayed(find, 350)
+        main.postDelayed(find, if (screenWasOff) 450 else 50)
     }
 
-    private fun wake() {
+    /** Turns the screen on; with [dismiss], also asks Android to bring up the PIN pad. */
+    private fun wake(dismiss: Boolean) {
         runCatching {
-            startActivity(Intent(this, WakeActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION))
+            startActivity(
+                Intent(this, WakeActivity::class.java)
+                    .putExtra("dismiss", dismiss)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION),
+            )
         }
+    }
+
+    /** A digit label: "1", or "2 ABC" / "2, A B C" style. */
+    private fun digitOf(n: AccessibilityNodeInfo): String? {
+        for (cs in listOf(n.text, n.contentDescription)) {
+            val t = cs?.toString()?.trim() ?: continue
+            if (t.isEmpty() || !t[0].isDigit()) continue
+            if (t.length == 1 || !t[1].isDigit()) return t[0].toString()
+        }
+        return null
     }
 
     /** The lock screen's digit keys 0–9 (and Enter, if it has one), or null if the PIN pad isn't showing. */
     private fun pinKeys(): Map<String, AccessibilityNodeInfo>? {
         val roots = buildList {
             runCatching { windows.forEach { w -> w.root?.let { add(it) } } }
+            if (Build.VERSION.SDK_INT >= 30) runCatching {
+                val all = windowsOnAllDisplays
+                for (i in 0 until all.size()) all.valueAt(i).forEach { w -> w.root?.let { add(it) } }
+            }
             rootInActiveWindow?.let { add(it) }
         }
         val out = HashMap<String, AccessibilityNodeInfo>()
+        var count = 0
         for (r in roots) {
-            for (d in 0..9) {
-                val k = d.toString()
-                if (out.containsKey(k)) continue
-                val byId = r.findAccessibilityNodeInfosByViewId("com.android.systemui:id/key$d").firstOrNull()
-                if (byId != null) { out[k] = byId; continue }
-                r.findAccessibilityNodeInfosByText(k).firstOrNull { n ->
-                    n.packageName == "com.android.systemui" && (n.text?.toString()?.trim() == k || n.contentDescription?.toString()?.trim()?.startsWith(k) == true)
-                }?.let { out[k] = it }
-            }
-            if (!out.containsKey("enter")) {
-                (r.findAccessibilityNodeInfosByViewId("com.android.systemui:id/key_enter").firstOrNull()
-                    ?: r.findAccessibilityNodeInfosByText("Enter").firstOrNull { it.packageName == "com.android.systemui" && it.isClickable })
-                    ?.let { out["enter"] = it }
+            if (r.packageName?.toString() != "com.android.systemui") continue
+            val stack = ArrayDeque<AccessibilityNodeInfo>().apply { add(r) }
+            while (stack.isNotEmpty()) {
+                val n = stack.removeLast()
+                count++
+                val id = n.viewIdResourceName.orEmpty()
+                val d = Regex("""key(\d)$""").find(id)?.groupValues?.get(1) ?: digitOf(n)
+                if (d != null && !out.containsKey(d) && n.isVisibleToUser) out[d] = n
+                if (!out.containsKey("enter") && n.isVisibleToUser) {
+                    val label = (n.contentDescription ?: n.text)?.toString()?.lowercase().orEmpty()
+                    if (id.endsWith("key_enter") || label == "enter" || label == "ok" || label == "done") out["enter"] = n
+                }
+                for (i in 0 until n.childCount) n.getChild(i)?.let { stack.add(it) }
             }
         }
+        seen = count
         return if ((0..9).all { out.containsKey(it.toString()) }) out else null
     }
 

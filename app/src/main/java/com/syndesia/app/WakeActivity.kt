@@ -21,7 +21,7 @@ class WakeActivity : Activity() {
             window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
         }
         val km = getSystemService(KeyguardManager::class.java)
-        if (km.isKeyguardLocked) {
+        if (km.isKeyguardLocked && intent.getBooleanExtra("dismiss", true)) {
             km.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
                 override fun onDismissSucceeded() = finish()
                 override fun onDismissCancelled() = finish()

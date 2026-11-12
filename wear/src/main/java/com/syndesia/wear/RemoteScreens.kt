@@ -429,8 +429,11 @@ private fun UnlockButton() {
             "unlocked", "already", "nopin" -> "Phone unlocked"
             "wrong" -> "PIN didn't work. Check it in Syndesia › Settings on your phone"
             "nopin_saved" -> "Save your PIN first: Syndesia › Settings › Unlock from watch on your phone"
-            "nopad" -> "Couldn't find the PIN pad. Try again"
-            else -> "Couldn't unlock"
+            else -> if (r.startsWith("nopad")) {
+                val n = r.substringAfter(':', "0")
+                if (n == "0") "Couldn't see the lock screen. On your phone, turn the Syndesia watch remote off and on in Accessibility settings, then try again"
+                else "Couldn't find the PIN pad (saw $n items). Try again"
+            } else "Couldn't unlock"
         }
         Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
     }

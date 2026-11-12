@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.11.2 — 2026-11-12 · Unlock fix
+
+- Fixed: Unlock phone saying it couldn't find the PIN pad. Android hides the PIN pad from ordinary accessibility services; the watch remote is now declared as an accessibility tool so it can see and press the keys
+- Fixed: pressing Unlock with the PIN pad already open closed it. Syndesia now types straight into an open PIN pad, and otherwise swipes up on the lock screen like you would
+- Update both the phone app and the watch app. If it still can't see the lock screen, turn the Syndesia watch remote off and on in Accessibility settings
+
 ## 1.11.1 — 2026-11-12 · Unlock without a watch lock
 
 - Unlock phone no longer needs your watch to have a screen lock
