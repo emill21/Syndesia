@@ -54,6 +54,10 @@
             android:taskAffinity=""
             android:theme="@style/Theme.Syndesia.NoSwipe" />
         <activity
+            android:name=".AirSettingsActivity"
+            android:exported="false"
+            android:taskAffinity="" />
+        <activity
             android:name=".ComputerKeysActivity"
             android:exported="false"
             android:taskAffinity=""

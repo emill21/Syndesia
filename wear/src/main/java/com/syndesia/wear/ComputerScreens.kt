@@ -38,8 +38,10 @@ import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.LinkOff
 import androidx.compose.material.icons.rounded.Mouse
 import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.Sensors
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -69,6 +71,7 @@ import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material3.AppScaffold
 import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.Card
+import androidx.wear.compose.material3.FilledIconButton
 import androidx.wear.compose.material3.FilledTonalButton
 import androidx.wear.compose.material3.FilledTonalIconButton
 import androidx.wear.compose.material3.Icon
@@ -169,6 +172,15 @@ private fun Hub() {
                     )
                 }
                 item {
+                    FilledTonalButton(
+                        onClick = { ctx.startActivity(Intent(ctx, AirSettingsActivity::class.java)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        icon = { Icon(Icons.Rounded.Sensors, contentDescription = null) },
+                        secondaryLabel = { Text("Move your wrist, pinch to click") },
+                        label = { Text("Air mouse") },
+                    )
+                }
+                item {
                     OutlinedButton(
                         onClick = {
                             if (viaPhone) Pointer.relay(ctx, "stop") else { HidMouse.disconnect(); MouseKeeper.stop(ctx) }
@@ -266,6 +278,18 @@ private fun ComputerPad(onClose: () -> Unit) {
     var gain by remember { mutableFloatStateOf(2.2f) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
+    val airOn by AirMouse.running.collectAsStateWithLifecycle()
+    val air by AirMouse.settings.collectAsStateWithLifecycle()
+    val pinches by AirMouse.pinches.collectAsStateWithLifecycle()
+    val hasAir = remember { AirMouse.hasSensors(ctx) }
+    DisposableEffect(Unit) { onDispose { AirMouse.stop() } }
+    fun toggleAir() {
+        if (airOn) AirMouse.stop()
+        else AirMouse.start(ctx, object : AirMouse.Sink {
+            override fun move(dx: Float, dy: Float) = Pointer.move(ctx, dx, dy)
+            override fun click() = Pointer.click(ctx, HidMouse.LEFT)
+        })
+    }
 
     /** Watch pixels to computer pixels, faster for quick strokes (smoothed so it doesn't jump). */
     fun send(dx: Float, dy: Float) {
@@ -297,6 +321,33 @@ private fun ComputerPad(onClose: () -> Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     hint = false
+                    if (AirMouse.running.value) {
+                        // Air mouse: the screen is a clutch (Touch mode) or a mouse button (Always mode).
+                        val always = AirMouse.settings.value.mode == AirMouse.Mode.Always
+                        val t0 = down.uptimeMillis
+                        var pressedButton = false
+                        if (!always) AirMouse.clutch = true
+                        while (true) {
+                            val ev = withTimeoutOrNull(250) { awaitPointerEvent() }
+                            if (ev == null) {
+                                if (always && !pressedButton) {
+                                    pressedButton = true; holding = true
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    Pointer.press(ctx, HidMouse.LEFT)
+                                }
+                                continue
+                            }
+                            val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!ch.pressed) {
+                                val quick = ch.uptimeMillis - t0 < 220 && (ch.position - down.position).getDistance() < slop
+                                if (pressedButton) Pointer.release(ctx, HidMouse.LEFT) else if (quick) Pointer.click(ctx, HidMouse.LEFT)
+                                break
+                            }
+                        }
+                        AirMouse.clutch = false
+                        holding = false
+                        return@awaitEachGesture
+                    }
                     var last = down.position
                     var moved = false
                     var held = false
@@ -338,8 +389,16 @@ private fun ComputerPad(onClose: () -> Unit) {
     ) {
         Box(Modifier.fillMaxSize().padding(10.dp).background(if (holding) colors.primaryContainer else colors.surfaceContainer, CircleShape))
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Rounded.Computer, contentDescription = null, tint = colors.primary, modifier = Modifier.size(28.dp))
-            if (holding) Text("Holding · drag to select or move", style = MaterialTheme.typography.bodySmall, color = colors.onPrimaryContainer)
+            Icon(if (airOn) Icons.Rounded.Sensors else Icons.Rounded.Computer, contentDescription = null, tint = colors.primary, modifier = Modifier.size(28.dp))
+            if (airOn) Text(
+                (if (air.mode == AirMouse.Mode.Touch) "Air mouse · touch the screen and move your wrist" else "Air mouse · move your wrist; hold the screen to drag") +
+                    (if (air.pinch) "\nPinch to click" + (if (pinches > 0) " · $pinches" else "") else ""),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp),
+            )
+            else if (holding) Text("Holding · drag to select or move", style = MaterialTheme.typography.bodySmall, color = colors.onPrimaryContainer)
             else if (hint) Text(
                 "Drag to move · tap to click\nHold, then drag to select\nCrown scrolls",
                 style = MaterialTheme.typography.bodySmall,
@@ -349,7 +408,13 @@ private fun ComputerPad(onClose: () -> Unit) {
             )
         }
         Box(Modifier.fillMaxSize().padding(top = 14.dp), contentAlignment = Alignment.TopCenter) {
-            FilledTonalIconButton(onClick = onClose, modifier = Modifier.size(36.dp)) { Icon(Icons.Rounded.Close, contentDescription = "Close") }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilledTonalIconButton(onClick = onClose, modifier = Modifier.size(36.dp)) { Icon(Icons.Rounded.Close, contentDescription = "Close") }
+                if (hasAir) {
+                    if (airOn) FilledIconButton(onClick = { toggleAir() }, modifier = Modifier.size(36.dp)) { Icon(Icons.Rounded.Sensors, contentDescription = "Air mouse off") }
+                    else FilledTonalIconButton(onClick = { toggleAir() }, modifier = Modifier.size(36.dp)) { Icon(Icons.Rounded.Sensors, contentDescription = "Air mouse on") }
+                }
+            }
         }
         Box(Modifier.fillMaxSize().padding(bottom = 14.dp), contentAlignment = Alignment.BottomCenter) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

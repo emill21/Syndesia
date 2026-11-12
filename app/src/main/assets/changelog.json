@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.10",
+    "date": "2026-11-11",
+    "title": "Air mouse",
+    "items": [
+      "Air mouse: move your wrist to move the cursor, and pinch finger and thumb together to click. Works on the computer mouse and the phone remote touchpads; tap the sensor button at the top to turn it on",
+      "Two ways to move: only while a finger rests on the screen (the default, so the cursor stays put when you're not using it), or always on, where holding the screen drags",
+      "Two quick pinches make a double-click. Right-click stays on the touchpad's button",
+      "Air mouse settings on the watch (Computer mouse › Air mouse): speed, flip left/right or up/down, pinch on or off, and Calibrate pinch, which learns how firmly you pinch",
+      "Update the watch app from the Install tab to get it"
+    ]
+  },
+  {
     "version": "1.9",
     "date": "2026-11-11",
     "title": "Computer mouse",

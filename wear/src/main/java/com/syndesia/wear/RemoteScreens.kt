@@ -45,11 +45,13 @@ import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Screenshot
+import androidx.compose.material.icons.rounded.Sensors
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.ViewAgenda
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -240,6 +242,20 @@ private fun Touchpad(onClose: () -> Unit) {
     var hint by remember { mutableStateOf(true) }
     var holding by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
+    val airOn by AirMouse.running.collectAsStateWithLifecycle()
+    val air by AirMouse.settings.collectAsStateWithLifecycle()
+    val hasAir = remember { AirMouse.hasSensors(ctx) }
+    DisposableEffect(Unit) { onDispose { AirMouse.stop() } }
+    fun toggleAir() {
+        if (airOn) AirMouse.stop()
+        else AirMouse.start(ctx, object : AirMouse.Sink {
+            // Air-mouse units are computer-mouse counts; scale them to the same units a finger drag uses.
+            override fun move(dx: Float, dy: Float) {
+                synchronized(pending) { pending[0] += dx * padW / 600f; pending[1] += dy * padW / 600f }
+            }
+            override fun click() { Remote.send(ctx, "click") }
+        })
+    }
 
     LaunchedEffect(Unit) {
         focus.requestFocus()
@@ -275,6 +291,32 @@ private fun Touchpad(onClose: () -> Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     hint = false
+                    if (AirMouse.running.value) {
+                        val always = AirMouse.settings.value.mode == AirMouse.Mode.Always
+                        val t0 = down.uptimeMillis
+                        var pressedButton = false
+                        if (!always) AirMouse.clutch = true
+                        while (true) {
+                            val ev = withTimeoutOrNull(250) { awaitPointerEvent() }
+                            if (ev == null) {
+                                if (always && !pressedButton) {
+                                    pressedButton = true; holding = true
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    Remote.send(ctx, "press")
+                                }
+                                continue
+                            }
+                            val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!ch.pressed) {
+                                val quick = ch.uptimeMillis - t0 < 220 && (ch.position - down.position).getDistance() < slop
+                                if (pressedButton) Remote.send(ctx, "release") else if (quick) Remote.send(ctx, "click")
+                                break
+                            }
+                        }
+                        AirMouse.clutch = false
+                        holding = false
+                        return@awaitEachGesture
+                    }
                     var last = down.position
                     var moved = false
                     var held = false
@@ -325,8 +367,16 @@ private fun Touchpad(onClose: () -> Unit) {
                 .background(if (holding) colors.primaryContainer else colors.surfaceContainer, CircleShape),
         )
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Rounded.Mouse, contentDescription = null, tint = colors.primary, modifier = Modifier.size(28.dp))
-            if (holding) Text("Holding · drag to select or move", style = MaterialTheme.typography.bodySmall, color = colors.onPrimaryContainer)
+            Icon(if (airOn) Icons.Rounded.Sensors else Icons.Rounded.Mouse, contentDescription = null, tint = colors.primary, modifier = Modifier.size(28.dp))
+            if (airOn && !holding) Text(
+                (if (air.mode == AirMouse.Mode.Touch) "Air mouse · touch the screen and move your wrist" else "Air mouse · move your wrist; hold the screen to drag") +
+                    (if (air.pinch) "\nPinch to tap" else ""),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp),
+            )
+            else if (holding) Text("Holding · drag to select or move", style = MaterialTheme.typography.bodySmall, color = colors.onPrimaryContainer)
             else if (hint) Text(
                 "Drag to move · tap to click\nHold, then drag to select or move\nTurn the crown to scroll",
                 style = MaterialTheme.typography.bodySmall,
@@ -337,7 +387,13 @@ private fun Touchpad(onClose: () -> Unit) {
         }
         // Close (top) and Back / Home (bottom)
         Box(Modifier.fillMaxSize().padding(top = 14.dp), contentAlignment = Alignment.TopCenter) {
-            FilledTonalIconButton(onClick = onClose, modifier = Modifier.size(36.dp)) { Icon(Icons.Rounded.Close, contentDescription = "Close") }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilledTonalIconButton(onClick = onClose, modifier = Modifier.size(36.dp)) { Icon(Icons.Rounded.Close, contentDescription = "Close") }
+                if (hasAir) {
+                    if (airOn) FilledIconButton(onClick = { toggleAir() }, modifier = Modifier.size(36.dp)) { Icon(Icons.Rounded.Sensors, contentDescription = "Air mouse off") }
+                    else FilledTonalIconButton(onClick = { toggleAir() }, modifier = Modifier.size(36.dp)) { Icon(Icons.Rounded.Sensors, contentDescription = "Air mouse on") }
+                }
+            }
         }
         Box(Modifier.fillMaxSize().padding(bottom = 14.dp), contentAlignment = Alignment.BottomCenter) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

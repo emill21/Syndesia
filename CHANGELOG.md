@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.10 — 2026-11-11 · Air mouse
+
+- Air mouse: move your wrist to move the cursor, and pinch finger and thumb together to click. Works on the computer mouse and the phone remote touchpads; tap the sensor button at the top to turn it on
+- Two ways to move: only while a finger rests on the screen (the default, so the cursor stays put when you're not using it), or always on, where holding the screen drags
+- Two quick pinches make a double-click. Right-click stays on the touchpad's button
+- Air mouse settings on the watch (Computer mouse › Air mouse): speed, flip left/right or up/down, pinch on or off, and Calibrate pinch, which learns how firmly you pinch
+- Update the watch app from the Install tab to get it
+
 ## 1.9 — 2026-11-11 · Computer mouse
 
 - Computer mouse: your watch becomes a Bluetooth mouse and keyboard for your computer. Pair it once like any wireless mouse, nothing to install on the computer
