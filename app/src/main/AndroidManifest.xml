@@ -42,6 +42,13 @@
         android:theme="@style/Theme.Syndesia.Starting">
 
         <activity
+            android:name=".WakeActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity="com.syndesia.app.wake"
+            android:launchMode="singleInstance"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"

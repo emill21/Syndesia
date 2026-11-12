@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.11 — 2026-11-11 · Unlock from watch
+
+- Unlock phone: a new button in the watch remote wakes your phone and types its PIN on the lock screen
+- Save the PIN on the phone in Settings › Watch remote › Unlock from watch. It's encrypted with a key kept in the phone's secure hardware and never sent to the watch
+- Only works while your watch has a screen lock, so a watch someone picks up off a table can't unlock your phone
+- A wrong saved PIN is tried once and not repeated, so it can't lock your phone out
+- Update both the phone app and the watch app to get this
+
 ## 1.10 — 2026-11-11 · Air mouse
 
 - Air mouse: move your wrist to move the cursor, and pinch finger and thumb together to click. Works on the computer mouse and the phone remote touchpads; tap the sensor button at the top to turn it on

@@ -113,7 +113,111 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
             "launch" -> launch(o.optString("pkg"))
             "type" -> reply(node, JSONObject().put("type", "typed").put("ok", type(o.optString("text"), o.optBoolean("enter"))))
             "backspace" -> backspace()
+            "unlock" -> unlock(node)
         }
+    }
+
+    // --------------------------------------------------------------- unlock with PIN
+
+    private var unlocking = false
+
+    /**
+     * Wakes the phone, brings up the PIN pad and types the saved PIN, once. Never retries, so a
+     * wrong saved PIN can't burn through attempts and lock the phone out.
+     */
+    private fun unlock(node: String) {
+        fun done(ok: Boolean, why: String) {
+            unlocking = false
+            reply(node, JSONObject().put("type", "unlocked").put("ok", ok).put("why", why))
+        }
+        val km = getSystemService(android.app.KeyguardManager::class.java)
+        if (!km.isKeyguardLocked) {
+            wake()
+            return done(true, "already")
+        }
+        if (unlocking) return
+        val pin = PinVault.load(this)
+        if (!km.isDeviceSecure) {
+            // Swipe-only lock screen: nothing to type.
+            wake(); return done(true, "nopin")
+        }
+        if (pin.isNullOrEmpty()) return done(false, "nopin_saved")
+        unlocking = true
+        wake()
+        val started = SystemClock.uptimeMillis()
+        val find = object : Runnable {
+            override fun run() {
+                if (!km.isKeyguardLocked) return done(true, "unlocked") // Watch Unlock / face got there first
+                val keys = pinKeys()
+                if (keys == null) {
+                    if (SystemClock.uptimeMillis() - started > 4000) return done(false, "nopad")
+                    main.postDelayed(this, 150); return
+                }
+                typePin(pin, keys) { entered ->
+                    if (!entered) return@typePin done(false, "nopad")
+                    main.postDelayed({ done(!km.isKeyguardLocked, if (km.isKeyguardLocked) "wrong" else "unlocked") }, 900)
+                }
+            }
+        }
+        main.postDelayed(find, 350)
+    }
+
+    private fun wake() {
+        runCatching {
+            startActivity(Intent(this, WakeActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION))
+        }
+    }
+
+    /** The lock screen's digit keys 0–9 (and Enter, if it has one), or null if the PIN pad isn't showing. */
+    private fun pinKeys(): Map<String, AccessibilityNodeInfo>? {
+        val roots = buildList {
+            runCatching { windows.forEach { w -> w.root?.let { add(it) } } }
+            rootInActiveWindow?.let { add(it) }
+        }
+        val out = HashMap<String, AccessibilityNodeInfo>()
+        for (r in roots) {
+            for (d in 0..9) {
+                val k = d.toString()
+                if (out.containsKey(k)) continue
+                r.findAccessibilityNodeInfosByViewId("com.android.systemui:id/key$d").firstOrNull()?.let { out[k] = it; continue }
+                r.findAccessibilityNodeInfosByText(k).firstOrNull { n ->
+                    n.packageName == "com.android.systemui" && (n.text?.toString()?.trim() == k || n.contentDescription?.toString()?.trim()?.startsWith(k) == true)
+                }?.let { out[k] = it }
+            }
+            if (!out.containsKey("enter")) {
+                (r.findAccessibilityNodeInfosByViewId("com.android.systemui:id/key_enter").firstOrNull()
+                    ?: r.findAccessibilityNodeInfosByText("Enter").firstOrNull { it.packageName == "com.android.systemui" && it.isClickable })
+                    ?.let { out["enter"] = it }
+            }
+        }
+        return if ((0..9).all { out.containsKey(it.toString()) }) out else null
+    }
+
+    private fun clickNode(n: AccessibilityNodeInfo): Boolean {
+        var c: AccessibilityNodeInfo? = n
+        while (c != null && !c.isClickable) c = c.parent
+        if (c?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) return true
+        val b = android.graphics.Rect().also { n.getBoundsInScreen(it) }
+        if (b.isEmpty) return false
+        tap(b.exactCenterX(), b.exactCenterY(), 40)
+        return true
+    }
+
+    private fun typePin(pin: String, keys: Map<String, AccessibilityNodeInfo>, then: (Boolean) -> Unit) {
+        val seq = pin.map { it.toString() } + (if (keys.containsKey("enter")) listOf("enter") else emptyList())
+        var i = 0
+        val step = object : Runnable {
+            override fun run() {
+                if (i >= seq.size) return then(true)
+                // Auto-confirm PINs unlock on the last digit; don't tap anything after that.
+                if (!getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked) return then(true)
+                val n = keys[seq[i]] ?: return then(false)
+                if (!clickNode(n)) return then(false)
+                i++
+                main.postDelayed(this, 110)
+            }
+        }
+        main.post(step)
     }
 
     // --------------------------------------------------------------- mouse

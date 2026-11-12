@@ -127,6 +127,7 @@ fun SettingsScreen(
                 ) {
                     ctx.openSafely(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                 }
+                UnlockPinRow()
             }
         }
 
@@ -234,4 +235,72 @@ private fun ComputerMouseCard() {
             }
         }
     }
+}
+
+
+/** Saves the phone's PIN so the watch remote's Unlock button can type it. */
+@Composable
+private fun UnlockPinRow() {
+    val ctx = LocalContext.current
+    var saved by remember { mutableStateOf(com.syndesia.app.PinVault.has(ctx)) }
+    var editing by remember { mutableStateOf(false) }
+    var confirmRemove by remember { mutableStateOf(false) }
+    LinkRow(
+        Icons.Rounded.Password,
+        if (saved) "Unlock from watch is on" else "Unlock from watch",
+        if (saved) "The watch remote's Unlock button types your PIN. Tap to change or remove it."
+        else "Save this phone's PIN so the watch remote can type it on the lock screen. Kept encrypted on this phone only.",
+    ) { if (saved) confirmRemove = true else editing = true }
+
+    if (editing) {
+        var pin by remember { mutableStateOf("") }
+        var again by remember { mutableStateOf("") }
+        val ok = pin.length >= 4 && pin == again
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { editing = false },
+            icon = { androidx.compose.material3.Icon(Icons.Rounded.Password, contentDescription = null) },
+            title = { Text("Phone PIN") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Anyone with your unlocked watch will be able to unlock this phone. The watch has to be unlocked (on your wrist) for the button to work. Enter the same PIN you use on the lock screen; a wrong one is tried only once.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    val kb = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword)
+                    androidx.compose.material3.OutlinedTextField(
+                        value = pin, onValueChange = { v -> pin = v.filter { it.isDigit() }.take(16) },
+                        label = { Text("PIN") }, singleLine = true, keyboardOptions = kb,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    androidx.compose.material3.OutlinedTextField(
+                        value = again, onValueChange = { v -> again = v.filter { it.isDigit() }.take(16) },
+                        label = { Text("PIN again") }, singleLine = true, keyboardOptions = kb,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        isError = again.isNotEmpty() && again != pin,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(enabled = ok, onClick = {
+                    com.syndesia.app.PinVault.save(ctx, pin); saved = true; editing = false
+                }) { Text("Save") }
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { editing = false }) { Text("Cancel") } },
+        )
+    }
+    if (confirmRemove) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { confirmRemove = false },
+        title = { Text("Unlock from watch") },
+        text = { Text("Change the saved PIN, or remove it so the watch can't unlock this phone.") },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = { confirmRemove = false; editing = true }) { Text("Change") }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = {
+                com.syndesia.app.PinVault.clear(ctx); saved = false; confirmRemove = false
+            }) { Text("Remove") }
+        },
+    )
 }

@@ -40,6 +40,7 @@ import androidx.compose.material.icons.rounded.FlashlightOn
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Mouse
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -141,6 +142,7 @@ private fun Panel() {
                     RoundButton(Icons.Rounded.CropSquare, "Recent apps") { g("recents") }
                 }
             }
+            item { UnlockButton() }
             item {
                 Button(
                     onClick = { ctx.startActivity(Intent(ctx, MouseActivity::class.java)) },
@@ -406,6 +408,47 @@ private fun Touchpad(onClose: () -> Unit) {
             }
         }
     }
+}
+
+/** Wakes the phone and has it type its saved PIN. Only works while this watch has a screen lock. */
+@Composable
+private fun UnlockButton() {
+    val ctx = LocalContext.current
+    val result by Remote.unlock.collectAsStateWithLifecycle()
+    var waiting by remember { mutableStateOf(false) }
+    LaunchedEffect(result, waiting) {
+        if (!waiting) return@LaunchedEffect
+        val r = result
+        if (r == null) {
+            delay(8000)
+            if (Remote.unlock.value == null) { waiting = false; Toast.makeText(ctx, "Phone didn't answer", Toast.LENGTH_SHORT).show() }
+            return@LaunchedEffect
+        }
+        waiting = false
+        val msg = when (r) {
+            "unlocked", "already", "nopin" -> "Phone unlocked"
+            "wrong" -> "PIN didn't work. Check it in Syndesia › Settings on your phone"
+            "nopin_saved" -> "Save your PIN first: Syndesia › Settings › Unlock from watch on your phone"
+            "nopad" -> "Couldn't find the PIN pad. Try again"
+            else -> "Couldn't unlock"
+        }
+        Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+    }
+    FilledTonalButton(
+        onClick = {
+            val km = ctx.getSystemService(android.app.KeyguardManager::class.java)
+            if (km?.isDeviceSecure != true) {
+                Toast.makeText(ctx, "Set a screen lock on this watch first, so only you can unlock your phone", Toast.LENGTH_LONG).show()
+            } else if (!waiting) {
+                waiting = true
+                Remote.requestUnlock(ctx)
+            }
+        },
+        modifier = Modifier.fillMaxWidth(),
+        icon = { Icon(Icons.Rounded.LockOpen, contentDescription = null) },
+        secondaryLabel = { Text(if (waiting) "Unlocking…" else "Types your PIN") },
+        label = { Text("Unlock phone") },
+    )
 }
 
 // =================================================================== apps

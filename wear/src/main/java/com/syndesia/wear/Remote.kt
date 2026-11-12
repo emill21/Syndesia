@@ -37,6 +37,15 @@ object Remote {
     private val _torch = MutableStateFlow(false)
     val torch: StateFlow<Boolean> = _torch.asStateFlow()
 
+    /** Result of the last Unlock: null while waiting, else the phone's reason ("unlocked", "wrong", …). */
+    private val _unlock = MutableStateFlow<String?>(null)
+    val unlock: StateFlow<String?> = _unlock.asStateFlow()
+
+    fun requestUnlock(ctx: Context) {
+        _unlock.value = null
+        send(ctx, "unlock")
+    }
+
     private val _typed = MutableStateFlow<Boolean?>(null)
     val typed: StateFlow<Boolean?> = _typed.asStateFlow()
 
@@ -56,6 +65,7 @@ object Remote {
             }
             "torch" -> _torch.value = o.optBoolean("on")
             "typed" -> _typed.value = o.optBoolean("ok")
+            "unlocked" -> _unlock.value = o.optString("why", if (o.optBoolean("ok")) "unlocked" else "failed")
         }
     }
 

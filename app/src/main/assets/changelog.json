@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.11",
+    "date": "2026-11-11",
+    "title": "Unlock from watch",
+    "items": [
+      "Unlock phone: a new button in the watch remote wakes your phone and types its PIN on the lock screen",
+      "Save the PIN on the phone in Settings › Watch remote › Unlock from watch. It's encrypted with a key kept in the phone's secure hardware and never sent to the watch",
+      "Only works while your watch has a screen lock, so a watch someone picks up off a table can't unlock your phone",
+      "A wrong saved PIN is tried once and not repeated, so it can't lock your phone out",
+      "Update both the phone app and the watch app to get this"
+    ]
+  },
+  {
     "version": "1.10",
     "date": "2026-11-11",
     "title": "Air mouse",
