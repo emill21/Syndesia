@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.15 — 2026-11-12 · Faster Private space
+
+- Unlock phone with the screen off: Syndesia now waits for the screen to come on, then swipes up and types your PIN (it tries the swipe a few times if the lock screen isn't ready)
+- Private space and Private apps zip straight to the bottom of the app list instead of scrolling slowly
+- Private space now switches the fingerprint prompt to your PIN and types it, so you don't have to touch the sensor
+- Private apps only lists apps in the Private section (below its header), and leaves out the Add/Install tile
+- Update the phone app to get these
+
 ## 1.14 — 2026-11-12 · Private apps
 
 - Private apps: a new button in the watch remote lists the apps in your phone's Private space and opens the one you tap. It opens Private space for you first, typing your saved PIN if it asks (or use your fingerprint)

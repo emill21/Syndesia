@@ -175,28 +175,37 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
 
         val screenWasOff = !pm.isInteractive
         if (screenWasOff) wake(false)
-        val started = SystemClock.uptimeMillis()
-        var swiped = false
+        var started = SystemClock.uptimeMillis()
+        var awakeAt = if (screenWasOff) 0L else started
+        var swipes = 0
+        var lastSwipe = 0L
         var asked = false
         val find = object : Runnable {
             override fun run() {
                 if (!km.isKeyguardLocked) return done(true, "unlocked") // Watch Unlock / face got there first
                 pinKeys()?.let { return type(it) }
-                val t = SystemClock.uptimeMillis() - started
-                if (!swiped && t > 300) {
+                val now = SystemClock.uptimeMillis()
+                if (awakeAt == 0L) {
+                    // Screen still coming on: wait for it, then give the lock screen a moment to take touches.
+                    if (pm.isInteractive) awakeAt = now
+                    else if (now - started > 3000) { wake(false); started = now }
+                    main.postDelayed(this, 100); return
+                }
+                val sinceAwake = now - awakeAt
+                if (sinceAwake > (if (screenWasOff) 650 else 150) && swipes < 3 && now - lastSwipe > 900) {
                     // Swipe up from the very bottom edge, like you would, to bring up the PIN pad.
                     // (Starting higher lands on the under-screen fingerprint sensor, which eats the swipe.)
-                    swiped = true
+                    swipes++; lastSwipe = now
                     swipe(screenW / 2f, screenH - 6f, screenW / 2f, screenH * 0.35f, 260)
-                } else if (!asked && t > 1600) {
-                    // Swipe didn't do it: ask Android to show the PIN pad.
+                } else if (swipes >= 2 && !asked && now - lastSwipe > 700) {
+                    // Swiping didn't do it: ask Android to show the PIN pad.
                     asked = true
                     wake(true)
-                } else if (t > 5000) return done(false, "nopad")
-                main.postDelayed(this, 150)
+                } else if (sinceAwake > 7000) return done(false, "nopad")
+                main.postDelayed(this, 120)
             }
         }
-        main.postDelayed(find, if (screenWasOff) 450 else 50)
+        main.postDelayed(find, 50)
     }
 
     // --------------------------------------------------------------- private space
@@ -226,16 +235,15 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
                         main.postDelayed({ privateAuth(0, done) }, 700)
                         return
                     }
-                    if (++tries > 16) return done("notfound")
-                    // Scroll the app list down toward the bottom, where Private space sits.
-                    val list = root?.let { findScrollable(it) }
-                    if (list == null || !list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) {
-                        swipe(screenW / 2f, screenH * 0.75f, screenW / 2f, screenH * 0.25f, 180)
+                    if (++tries > 8) return done("notfound")
+                    // Zip straight to the bottom of the app list, where Private space sits.
+                    if (zipToBottom(root) == 0 && tries > 2) {
+                        swipe(screenW / 2f, screenH * 0.8f, screenW / 2f, screenH * 0.1f, 60)
                     }
-                    main.postDelayed(this, 280)
+                    main.postDelayed(this, 180)
                 }
             }
-            main.postDelayed(look, 650)
+            main.postDelayed(look, 450)
         }, 350)
     }
 
@@ -268,23 +276,76 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
     }
 
     /** After tapping Private: if a PIN pad (or a "Use PIN" button) shows up, type the saved PIN once. */
+    private var askedForPin = false
+
+    /**
+     * After tapping Private: switch the fingerprint prompt to the PIN, then type the saved PIN —
+     * on a number pad, or into the PIN box with Enter.
+     */
     private fun privateAuth(step: Int, done: (String) -> Unit) {
+        if (step == 0) askedForPin = false
         val pin = PinVault.load(this)
         val keys = pinKeys(anyPackage = true)
         if (keys != null) {
             if (pin.isNullOrEmpty()) return done("needpin")
             return typePin(pin, keys, lockScreen = false) { done(if (it) "opened" else "auth") }
         }
-        if (step == 0 || step == 4) {
-            // Fingerprint prompt: switch it to the PIN so we can type it.
-            val usePin = rootsNow().firstNotNullOfOrNull { r ->
-                r.findAccessibilityNodeInfosByText("Use PIN").firstOrNull()
-                    ?: r.findAccessibilityNodeInfosByText("Use password").firstOrNull()
+        if (!pin.isNullOrEmpty()) {
+            pinField()?.let { field ->
+                field.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+                val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, pin) }
+                field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+                main.postDelayed({
+                    val entered = Build.VERSION.SDK_INT >= 30 &&
+                        field.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+                    if (!entered) findButton(listOf("enter", "ok", "confirm", "done", "next", "continue"))?.let { clickNode(it) }
+                    main.postDelayed({ done("opened") }, 500)
+                }, 150)
+                return
             }
-            if (usePin != null && !pin.isNullOrEmpty()) clickNode(usePin)
+            if (!askedForPin) findButton(listOf("use pin", "use password", "use pattern", "use screen lock"))?.let {
+                askedForPin = true
+                clickNode(it)
+            }
         }
-        if (step > 12) return done("opened") // no PIN needed, or you used your fingerprint
-        main.postDelayed({ privateAuth(step + 1, done) }, 250)
+        if (step > 24) return done("opened") // no PIN needed, or you used your fingerprint
+        main.postDelayed({ privateAuth(step + 1, done) }, 150)
+    }
+
+    /** A visible PIN/password box in a system prompt. */
+    private fun pinField(): AccessibilityNodeInfo? {
+        for (r in rootsNow()) {
+            val pkg = r.packageName?.toString()
+            if (pkg != "com.android.systemui" && pkg != "com.android.settings") continue
+            val stack = ArrayDeque<AccessibilityNodeInfo>().apply { add(r) }
+            while (stack.isNotEmpty()) {
+                val n = stack.removeLast()
+                if (n.isVisibleToUser && n.isEditable && (n.isPassword || n.inputType != 0)) return n
+                for (i in 0 until n.childCount) n.getChild(i)?.let { stack.add(it) }
+            }
+        }
+        return null
+    }
+
+    private fun findButton(labels: List<String>): AccessibilityNodeInfo? {
+        for (r in rootsNow()) {
+            val stack = ArrayDeque<AccessibilityNodeInfo>().apply { add(r) }
+            while (stack.isNotEmpty()) {
+                val n = stack.removeLast()
+                val l = label(n).lowercase()
+                if (n.isVisibleToUser && l in labels) return n
+                for (i in 0 until n.childCount) n.getChild(i)?.let { stack.add(it) }
+            }
+        }
+        return null
+    }
+
+    /** Scrolls the app drawer all the way down at once. Returns how many pages it moved. */
+    private fun zipToBottom(root: AccessibilityNodeInfo?): Int {
+        val list = root?.let { findScrollable(it) } ?: return 0
+        var n = 0
+        while (n < 40 && list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) n++
+        return n
     }
 
     private fun label(n: AccessibilityNodeInfo): String =
@@ -307,64 +368,76 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
         return false
     }
 
-    private val notApps = setOf("lock", "settings", "install", "install apps", "private", "private space", "private space settings", "unlock")
+    private val notApps = setOf(
+        "lock", "settings", "install", "install apps", "add", "add apps", "add app", "private", "private space",
+        "private space settings", "unlock", "search", "search apps",
+    )
 
     /**
-     * Walks the open app drawer in reading order. Every app tile after the Private header belongs
-     * to Private space. [past] carries over between scrolls once the header has gone by.
+     * The Private space app tiles on screen right now: tiles in the app list below the Private
+     * header, or every tile when the header has scrolled off above (we're at the bottom, so the
+     * whole screen is Private space). Null when the header is above but we can't tell, i.e. never.
      */
-    private fun scanPrivate(root: AccessibilityNodeInfo, pastHeader: Boolean, visit: (String, AccessibilityNodeInfo) -> Boolean): Boolean {
-        var past = pastHeader
-        val stack = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+    private fun privateTiles(root: AccessibilityNodeInfo): Pair<Boolean, List<Pair<String, AccessibilityNodeInfo>>> {
+        val list = findScrollable(root) ?: root
+        var header: android.graphics.Rect? = null
+        val tiles = ArrayList<Pair<String, AccessibilityNodeInfo>>()
+        val r = android.graphics.Rect()
+        val stack = ArrayDeque<AccessibilityNodeInfo>().apply { add(list) }
         while (stack.isNotEmpty()) {
             val n = stack.removeLast()
-            if (isPrivateHeader(n)) past = true
-            else if (past && n.isVisibleToUser && n.isClickable && !n.text.isNullOrBlank()) {
-                val l = label(n)
-                if (l.lowercase() !in notApps && !l.lowercase().startsWith("lock") && visit(l, n)) return past
+            if (n.isVisibleToUser) {
+                if (isPrivateHeader(n)) {
+                    n.getBoundsInScreen(r)
+                    if (header == null || r.bottom > header!!.bottom) header = android.graphics.Rect(r)
+                } else if (n.isClickable && !n.text.isNullOrBlank()) {
+                    val l = label(n)
+                    val low = l.lowercase()
+                    if (low !in notApps && !low.startsWith("lock") && !low.startsWith("add ") && !low.startsWith("install ")) tiles.add(l to n)
+                }
             }
-            for (i in n.childCount - 1 downTo 0) n.getChild(i)?.let { stack.add(it) }
+            for (i in 0 until n.childCount) n.getChild(i)?.let { stack.add(it) }
         }
-        return past
+        val h = header ?: return false to tiles
+        return true to tiles.filter { (_, n) -> n.getBoundsInScreen(r); r.top >= h.bottom - 4 }
     }
-
-    private fun scrollDrawer(root: AccessibilityNodeInfo?): Boolean =
-        root?.let { findScrollable(it) }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) == true
 
     /** The names of the apps in Private space (it must already be open in the app drawer). */
     private fun collectPrivateApps(then: (List<String>) -> Unit) {
-        val names = LinkedHashSet<String>()
-        var past = false
-        var quiet = 0
+        val names = sortedSetOf<String>(String.CASE_INSENSITIVE_ORDER)
         var rounds = 0
         val step = object : Runnable {
             override fun run() {
-                val root = rootInActiveWindow
-                val before = names.size
-                if (root != null) past = scanPrivate(root, past) { l, _ -> names.add(l); false }
-                quiet = if (names.size == before) quiet + 1 else 0
-                if (++rounds > 12 || quiet >= 2 || !scrollDrawer(root)) return then(if (past) names.toList() else emptyList())
-                main.postDelayed(this, 300)
+                val root = rootInActiveWindow ?: return then(names.toList())
+                if (rounds == 0) zipToBottom(root)
+                val (sawHeader, tiles) = privateTiles(root)
+                tiles.forEach { names.add(it.first) }
+                // Header visible: we've seen the whole section. Otherwise page back up toward it.
+                val list = findScrollable(root)
+                if (sawHeader || ++rounds > 10 || list?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD) != true) {
+                    return then(names.toList())
+                }
+                main.postDelayed(this, 200)
             }
         }
-        main.post(step)
+        main.postDelayed(step, 150)
     }
 
-    /** Taps a Private space app by name, scrolling the drawer to find it. */
+    /** Taps a Private space app by name. */
     private fun openPrivateApp(name: String, then: (Boolean) -> Unit) {
-        var past = false
         var rounds = 0
         val step = object : Runnable {
             override fun run() {
-                val root = rootInActiveWindow
-                var hit: AccessibilityNodeInfo? = null
-                if (root != null) past = scanPrivate(root, past) { l, n -> if (l == name) { hit = n; true } else false }
-                hit?.let { clickNode(it); return then(true) }
-                if (++rounds > 12 || !scrollDrawer(root)) return then(false)
-                main.postDelayed(this, 300)
+                val root = rootInActiveWindow ?: return then(false)
+                if (rounds == 0) zipToBottom(root)
+                val (sawHeader, tiles) = privateTiles(root)
+                tiles.firstOrNull { it.first.equals(name, ignoreCase = true) }?.let { clickNode(it.second); return then(true) }
+                val list = findScrollable(root)
+                if (sawHeader || ++rounds > 10 || list?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD) != true) return then(false)
+                main.postDelayed(this, 200)
             }
         }
-        main.post(step)
+        main.postDelayed(step, 150)
     }
 
     private fun rootsNow(): List<AccessibilityNodeInfo> = buildList {
