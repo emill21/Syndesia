@@ -13,6 +13,9 @@ import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
 import com.syndesia.app.adb.Adb
 import com.syndesia.app.adb.Discovery
+import com.syndesia.app.adb.Link
+import com.syndesia.app.adb.PortScan
+import com.syndesia.app.adb.PortState
 import com.syndesia.app.adb.Transfers
 import com.syndesia.app.adb.Watch
 import kotlinx.coroutines.CoroutineScope
@@ -88,22 +91,44 @@ object FromWatch {
         val saved = prefs.watches
         val host = ip.ifBlank { saved.firstOrNull()?.host } ?: return@withLock "Connect this watch in Syndesia on your phone once first."
         // The port changes whenever Wireless debugging restarts: ask mDNS, else use the last one we knew.
-        val searching = Discovery.searching.value
-        if (!searching) Discovery.start(ctx)
-        val port = withTimeoutOrNull(10_000) {
-            var p: Int? = null
-            while (p == null) {
-                p = Discovery.found.value.firstOrNull { it.host == host }?.connectPort
-                if (p == null) delay(300)
+        Discovery.hold(ctx, "watch")
+        val advertised = try {
+            withTimeoutOrNull(10_000) {
+                var p: Int? = null
+                while (p == null) {
+                    p = Discovery.found.value.firstOrNull { it.host == host }?.connectPort
+                    if (p == null) delay(300)
+                }
+                p
             }
-            p
-        } ?: saved.firstOrNull { it.host == host }?.port
-        if (!searching) Discovery.stop()
-        if (port == null) return@withLock "Couldn't find the watch on Wi-Fi. Is Wireless debugging on?"
-        val r = Adb.connect(ctx, host, port)
-        r.exceptionOrNull()?.let { return@withLock it.message ?: "Couldn't connect" }
-        r.getOrNull()?.let { info -> prefs.remember(SavedWatch(host, port, info.model, info.serial, System.currentTimeMillis())) }
-        null
+        } finally {
+            Discovery.release("watch")
+        }
+        val ports = listOfNotNull(advertised, saved.firstOrNull { it.host == host }?.port).distinct().toMutableList()
+        var why = "Couldn't find the watch on Wi-Fi. Is Wireless debugging on?"
+        var scanned = false
+        var i = 0
+        while (true) {
+            if (i >= ports.size) {
+                // Neither worked. If the watch answers at that address, mDNS just hasn't caught up
+                // with its new port: look for it directly, once.
+                val there = PortScan.knock(host, ports.firstOrNull() ?: 5555)
+                if (scanned || there == PortState.Unreachable || (there == PortState.Open && ports.isNotEmpty())) break
+                scanned = true
+                ports += PortScan.findAdb(host).filterNot { it in ports }
+                if (i >= ports.size) break
+            }
+            val port = ports[i++]
+            val r = Adb.connect(ctx, host, port)
+            val info = r.getOrNull()
+            if (info != null) {
+                prefs.remember(SavedWatch(host, port, info.model, info.serial, System.currentTimeMillis()))
+                return@withLock null
+            }
+            why = r.exceptionOrNull()?.message ?: "Couldn't connect"
+            if ((Adb.link.value as? Link.Failed)?.needsPairing == true) break
+        }
+        why
     }
 
     fun connect(ctx: Context, node: String, ip: String) {

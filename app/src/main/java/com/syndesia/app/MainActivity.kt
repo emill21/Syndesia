@@ -22,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.syndesia.app.adb.Adb
 import com.syndesia.app.ui.OnboardingScreen
 import com.syndesia.app.ui.SyndesiaApp
 import com.syndesia.app.ui.theme.SyndesiaTheme
@@ -38,9 +39,14 @@ object Incoming {
 }
 
 class MainActivity : ComponentActivity() {
+    /** The user went somewhere else (another app, the home screen) since this was last on screen. */
+    private var wentAway = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+        // A new launch: connect by itself again, whatever happened last time the app was open.
+        if (savedInstanceState == null) Adb.appOpened(fresh = true)
         Look.init(this)
         val prefs = Prefs(this)
         setContent {
@@ -61,6 +67,20 @@ class MainActivity : ComponentActivity() {
             }
         }
         if (savedInstanceState == null) handle(intent)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Coming back to Syndesia counts as opening it: a Disconnect from the last visit no longer applies.
+        if (wentAway) {
+            wentAway = false
+            Adb.appOpened()
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) wentAway = true
     }
 
     override fun onNewIntent(intent: Intent) {

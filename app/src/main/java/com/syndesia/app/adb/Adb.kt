@@ -51,6 +51,9 @@ sealed interface Link {
 
 class WatchNotConnected : IOException("Not connected to a watch")
 
+/** A connection attempt that was dropped because it wasn't wanted any more (the user disconnected, or is already connected). */
+class ConnectSuperseded : IOException("Not needed any more")
+
 private class Manager(
     private val key: PrivateKey,
     private val cert: Certificate,
@@ -106,10 +109,17 @@ object Adb {
     @Volatile
     private var conn: AdbConnection? = null
 
-    /** Set when the user taps Disconnect: no automatic connecting until they connect again by hand. */
+    /**
+     * Set when the user taps Disconnect: no automatic connecting until they connect again by hand,
+     * or leave Syndesia and come back to it ([appOpened]).
+     */
     @Volatile
     var userDisconnected = false
         private set
+
+    /** Counts every time the link is ended on purpose, so a connect still in flight can tell it's unwanted. */
+    @Volatile
+    private var ends = 0
 
     private fun manager(context: Context): Manager {
         manager?.let { return it }
@@ -119,6 +129,7 @@ object Adb {
 
     /** Throw away the cached identity (after [Keys.reset]). */
     fun resetIdentity() {
+        ends++
         wanted = false
         reconnectJob?.cancel()
         watchdog?.cancel()
@@ -138,15 +149,34 @@ object Adb {
         }
     }
 
-    /** User-initiated connect. Cancels any automatic reconnect in progress. */
-    suspend fun connect(context: Context, host: String, port: Int): Result<WatchInfo> {
-        reconnectJob?.cancel()
-        userDisconnected = false
-        return connectOnce(context.applicationContext, host, port, reconnecting = false)
+    /**
+     * Connect to a watch. [byUser] is a connect the user asked for: it cancels any automatic reconnect
+     * in progress and lifts an earlier Disconnect. An automatic one ([byUser] false) only goes ahead
+     * while nothing is connected and the user hasn't disconnected; otherwise it fails with
+     * [ConnectSuperseded] and leaves everything as it was.
+     */
+    suspend fun connect(context: Context, host: String, port: Int, byUser: Boolean = true): Result<WatchInfo> {
+        if (byUser) {
+            reconnectJob?.cancel()
+            userDisconnected = false
+        }
+        return connectOnce(context.applicationContext, host, port, reconnecting = false, auto = !byUser)
     }
 
-    private suspend fun connectOnce(context: Context, host: String, port: Int, reconnecting: Boolean): Result<WatchInfo> = withContext(Dispatchers.IO) {
+    private suspend fun connectOnce(
+        context: Context,
+        host: String,
+        port: Int,
+        reconnecting: Boolean,
+        auto: Boolean = false,
+    ): Result<WatchInfo> = withContext(Dispatchers.IO) {
         connectLock.withLock {
+            if (auto) {
+                // Checked here, with the lock held, so it can't cut across a connect the user just made.
+                val l = _link.value
+                if (userDisconnected || l is Link.Connected || l is Link.Connecting) return@withLock Result.failure(ConnectSuperseded())
+            }
+            val epoch = ends
             val m = manager(context)
             watchdog?.cancel()
             closeConn()
@@ -167,18 +197,18 @@ object Adb {
                 readInfo(host, port)
             }
             hint?.cancel()
+            if (epoch != ends || (reconnecting && !wanted)) {
+                // Disconnected (or the app was closed) while this was connecting: it isn't wanted any more.
+                closeConn()
+                runCatching { m.disconnect() }
+                _link.value = Link.Idle
+                return@withLock Result.failure(ConnectSuperseded())
+            }
             result.onSuccess {
-                if (reconnecting && !wanted) {
-                    // The user disconnected while we were reconnecting.
-                    closeConn()
-                    runCatching { m.disconnect() }
-                    _link.value = Link.Idle
-                } else {
-                    appContext = context
-                    wanted = true
-                    _link.value = Link.Connected(it)
-                    startWatchdog()
-                }
+                appContext = context
+                wanted = true
+                _link.value = Link.Connected(it)
+                startWatchdog()
             }.onFailure { e ->
                 closeConn()
                 runCatching { m.disconnect() }
@@ -191,14 +221,37 @@ object Adb {
         }
     }
 
-    /** Only the user (or closing the app) ends the link. Returns at once; the socket closes in the background. */
+    /**
+     * The user tapped Disconnect. Returns at once; the socket closes in the background.
+     * Nothing connects by itself again until they connect by hand or come back to the app.
+     */
     fun disconnect() {
-        wanted = false
         userDisconnected = true
+        end()
+    }
+
+    /**
+     * Syndesia was closed (swiped away from Recents): drop the link. Unlike [disconnect] this isn't
+     * the user asking to stay disconnected, so opening the app again may connect by itself.
+     */
+    fun close() = end()
+
+    private fun end() {
+        ends++
+        wanted = false
         reconnectJob?.cancel()
         watchdog?.cancel()
         _link.value = Link.Idle
         teardown()
+    }
+
+    /**
+     * The user opened Syndesia, or came back to it: a Disconnect from an earlier visit no longer holds
+     * automatic connecting back. [fresh] is a new launch, which also clears an old failure message.
+     */
+    fun appOpened(fresh: Boolean = false) {
+        userDisconnected = false
+        if (fresh) clearFailure()
     }
 
     private fun closeConn() {
@@ -259,25 +312,46 @@ object Adb {
         }
     }
 
-    /** Try to get the link back for two minutes, using a new port from mDNS if the watch advertises one. */
+    /**
+     * Try to get the link back for two minutes. The watch's port changes whenever Wireless debugging
+     * restarts, so each try uses the port mDNS advertises now; if the watch answers but mDNS is
+     * silent about a new port, look for it directly.
+     */
     private fun reconnect(ctx: Context, info: WatchInfo) {
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
             val deadline = System.currentTimeMillis() + 120_000
             var attempt = 0
+            var scans = 0
             _link.value = Link.Connecting(info.host, info.port, reconnecting = true)
             runCatching { onReconnecting?.invoke() }
-            while (isActive && wanted && !userDisconnected && System.currentTimeMillis() < deadline) {
-                val f = Discovery.found.value.firstOrNull {
-                    it.host == info.host || (info.serial.isNotBlank() && it.serial == info.serial)
+            // The app may be in the background, where nothing else is listening for the watch's adverts.
+            Discovery.hold(ctx, "reconnect")
+            try {
+                while (isActive && wanted && !userDisconnected && System.currentTimeMillis() < deadline) {
+                    Discovery.refresh()
+                    val f = Discovery.found.value.firstOrNull {
+                        it.connectPort != null && (it.host == info.host || (info.serial.isNotBlank() && it.serial == info.serial))
+                    }
+                    val host = f?.host ?: info.host
+                    val port = f?.connectPort ?: info.port
+                    val r = connectOnce(ctx, host, port, reconnecting = true)
+                    if (r.isSuccess) return@launch
+                    val e = r.exceptionOrNull()
+                    if (e is AdbPairingRequiredException || e?.cause is AdbPairingRequiredException) break
+                    attempt++
+                    if (scans < 2 && attempt % 4 == 3 && PortScan.knock(host, port) == PortState.Closed) {
+                        // The watch is there but that port is shut, and mDNS hasn't offered another.
+                        scans++
+                        for (p in PortScan.findAdb(host)) {
+                            if (!isActive || !wanted || userDisconnected) break
+                            if (connectOnce(ctx, host, p, reconnecting = true).isSuccess) return@launch
+                        }
+                    }
+                    delay(if (attempt <= 5) 2000 else 5000)
                 }
-                val host = f?.host ?: info.host
-                val port = f?.connectPort ?: info.port
-                val r = connectOnce(ctx, host, port, reconnecting = true)
-                if (r.isSuccess) return@launch
-                val e = r.exceptionOrNull()
-                if (e is AdbPairingRequiredException || e?.cause is AdbPairingRequiredException) break
-                delay(if (attempt++ < 5) 2000 else 5000)
+            } finally {
+                Discovery.release("reconnect")
             }
             if (wanted && isActive) {
                 wanted = false

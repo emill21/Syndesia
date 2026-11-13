@@ -221,6 +221,10 @@ private fun WatchHero(st: SyndesiaState, link: Link, stats: WatchStats?) {
                     Text("Couldn't connect", style = MaterialTheme.typography.headlineMedium)
                     Spacer(Modifier.height(4.dp))
                     Text(link.message, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant, textAlign = TextAlign.Center)
+                    st.seeking?.let {
+                        Spacer(Modifier.height(8.dp))
+                        Text(it, style = MaterialTheme.typography.labelLarge, color = colors.primary, textAlign = TextAlign.Center)
+                    }
                     Spacer(Modifier.height(14.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (link.needsPairing) Button(onClick = { st.pairRequest = AddressRequest(link.host) }) {
@@ -235,9 +239,10 @@ private fun WatchHero(st: SyndesiaState, link: Link, stats: WatchStats?) {
                 Link.Idle -> {
                     Text("No watch connected", style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
                     Text(
-                        if (searching) "Looking for watches on this Wi-Fi…" else "Turn on Wireless debugging on your watch.",
+                        st.seeking ?: if (searching) "Looking for watches on this Wi-Fi…" else "Turn on Wireless debugging on your watch.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
                     )
                     Spacer(Modifier.height(14.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

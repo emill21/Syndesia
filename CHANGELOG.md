@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.16.1 — 2026-11-13 · Connects by itself again
+
+- Fixed: Syndesia stopped connecting to your watch by itself once you had swiped it away from Recents, or tapped Disconnect. It kept treating that as "stay disconnected" until you connected by hand. Now it connects again whenever you open Syndesia or come back to it
+- Auto-connect keeps looking instead of trying once and giving up: it wakes the watch's Wi-Fi over Bluetooth and connects as soon as the watch shows up. The Watch tab says what it's doing, and no longer flashes "Couldn't connect" while the watch is still waking
+- Finds the watch's new port by itself. Wireless debugging picks a new port each time it restarts; if your Wi-Fi doesn't announce it, Syndesia now looks for it directly on the watch
+- A connection that drops while Syndesia is in the background can come back on the new port too
+- Update the phone app to get this
+
 ## 1.16 — 2026-11-12 · Select several
 
 - Select several files: in the phone's Files tab (your watch's storage), hold a file or folder to start selecting, then tap more. Save them all to the phone, move or copy them to another folder on the watch (open the folder, then tap Move here or Paste here), or delete them together. With one picked, More… shows rename, preview and install

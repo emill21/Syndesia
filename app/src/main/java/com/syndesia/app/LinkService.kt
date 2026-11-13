@@ -30,6 +30,8 @@ import kotlinx.coroutines.launch
  * Keeps the watch link alive while Syndesia is in the background (file picker open, another app
  * on screen). Without it, Android cuts a background app's network and the link drops within seconds.
  * Runs from connecting until the user taps Disconnect or swipes Syndesia away from Recents.
+ * It doesn't outlast the link: once a dropped connection can't be brought back it stops, and the
+ * app looks for the watch again the next time it's on screen.
  */
 class LinkService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -75,9 +77,14 @@ class LinkService : Service() {
         return START_NOT_STICKY
     }
 
-    /** Swiped away from Recents = "closed completely": drop the link and go. */
+    /**
+     * Swiped away from Recents = "closed completely": drop the link and go. That isn't the same as
+     * tapping Disconnect, so the next time Syndesia opens it connects by itself again. (Its process
+     * usually outlives the swipe, so a Disconnect here used to stick and switch that off for good.)
+     */
     override fun onTaskRemoved(rootIntent: Intent?) {
-        Adb.disconnect()
+        Adb.close()
+        Helper.releaseAsync(applicationContext)
         Hotspot.stop()
         stop()
         super.onTaskRemoved(rootIntent)

@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -80,18 +81,27 @@ import com.syndesia.app.Prefs
 import com.syndesia.app.SavedWatch
 import com.syndesia.app.adb.Adb
 import com.syndesia.app.adb.Apk
+import com.syndesia.app.adb.ConnectSuperseded
 import com.syndesia.app.adb.Discovery
 import com.syndesia.app.adb.Found
 import com.syndesia.app.adb.Helper
 import com.syndesia.app.adb.Hotspot
 import com.syndesia.app.adb.PortScan
+import com.syndesia.app.adb.PortState
 import com.syndesia.app.adb.InstallOptions
+import com.syndesia.app.adb.InstallStatus
 import com.syndesia.app.adb.Installer
 import com.syndesia.app.adb.Link
 import com.syndesia.app.adb.Transfers
+import com.syndesia.app.adb.WatchInfo
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -108,7 +118,10 @@ const val STORAGE_ROOT = "/storage/emulated/0"
 
 data class AddressRequest(val host: String = "", val port: String = "")
 
-/** Shared app state: saved watches, dialogs, options, and the auto-reconnect logic. */
+/** Is this advert the saved watch? Same serial, or (for adverts that don't carry one) same address. */
+private fun SavedWatch.isAt(f: Found) = (serial.isNotBlank() && serial == f.serial) || host == f.host
+
+/** Shared app state: saved watches, dialogs, options, and the auto-connect logic. */
 @Stable
 class SyndesiaState(private val ctx: Context) {
     val prefs = Prefs(ctx)
@@ -151,9 +164,17 @@ class SyndesiaState(private val ctx: Context) {
     var preparing by mutableStateOf(false)
     var problems by mutableStateOf<List<String>>(emptyList())
 
-    /** Watch we're trying to find again after its port changed or the link dropped. */
+    /** What auto-connect is doing right now, for the Watch tab to show (null while it isn't looking). */
+    var seeking by mutableStateOf<String?>(null); private set
+
+    /** Watch to look for first, after its link dropped or a connect to it failed. Otherwise: the last one used. */
     private var hunting: SavedWatch? = null
-    private val tried = mutableSetOf<String>()
+
+    /** An address where connecting failed lately: how many times running, and when last. */
+    private class Miss(val count: Int, val at: Long)
+
+    private val misses = mutableMapOf<String, Miss>()
+    private var seeker: Job? = null
 
     init {
         Installer.options = InstallOptions(allowDowngrade, grantPermissions)
@@ -163,7 +184,7 @@ class SyndesiaState(private val ctx: Context) {
         Adb.onLost = { host, _ ->
             scope.launch {
                 hunting = saved.firstOrNull { it.host == host }
-                tried.clear()
+                misses.clear()
             }
         }
     }
@@ -173,31 +194,53 @@ class SyndesiaState(private val ctx: Context) {
     fun setGrant(on: Boolean) { grantPermissions = on; prefs.grantPermissions = on; Installer.options = InstallOptions(allowDowngrade, grantPermissions) }
     fun setHidden(on: Boolean) { showHidden = on; prefs.showHidden = on }
     fun setSystemApps(on: Boolean) { showSystemApps = on; prefs.showSystemApps = on }
-    fun forget(w: SavedWatch) { prefs.forget(w); saved = prefs.watches }
-    fun forgetAll() { prefs.watches = emptyList(); saved = emptyList() }
+    fun forget(w: SavedWatch) {
+        prefs.forget(w)
+        saved = prefs.watches
+        if (hunting?.host == w.host) hunting = null
+    }
+
+    fun forgetAll() { prefs.watches = emptyList(); saved = emptyList(); hunting = null }
 
     /** User-initiated connect. */
     fun connect(host: String, port: Int) {
-        tried.clear()
+        misses.clear()
         hunting = null
-        doConnect(host, port)
-    }
-
-    private fun doConnect(host: String, port: Int) {
-        tried += "$host:$port"
         scope.launch {
-            Adb.connect(ctx, host, port).onSuccess { info ->
-                prefs.remember(SavedWatch(host, port, info.model, info.serial, System.currentTimeMillis()))
-                saved = prefs.watches
-                hunting = null
-                if (Installer.items.value.any { it.status == com.syndesia.app.adb.InstallStatus.Queued }) Installer.start()
-            }.onFailure {
+            if (!settle(host, port, Adb.connect(ctx, host, port))) {
                 // Maybe the watch's Wi-Fi is asleep: ask the helper (over Bluetooth) to wake it.
                 if (!Adb.userDisconnected) Helper.wakeAsync(ctx)
-                // Port probably changed: keep an eye on mDNS for this watch's new port.
+                // Port probably changed: auto-connect goes looking for this watch's new one.
                 saved.firstOrNull { it.host == host }?.let { hunting = it }
             }
         }
+    }
+
+    /** Bookkeeping after a connect attempt, by hand or automatic. True if it connected. */
+    private fun settle(host: String, port: Int, r: Result<WatchInfo>): Boolean {
+        val info = r.getOrNull()
+        if (info != null) {
+            prefs.remember(SavedWatch(host, port, info.model, info.serial, System.currentTimeMillis()))
+            saved = prefs.watches
+            hunting = null
+            misses.clear()
+            if (Installer.items.value.any { it.status == InstallStatus.Queued }) Installer.start()
+            return true
+        }
+        // Remember the miss, so auto-connect gives this address a rest instead of hammering it.
+        if (r.exceptionOrNull() !is ConnectSuperseded) {
+            val k = "$host:$port"
+            misses[k] = Miss((misses[k]?.count ?: 0) + 1, SystemClock.elapsedRealtime())
+        }
+        return false
+    }
+
+    /** The link is up, perhaps after it came back by itself on a new port: keep the saved address current. */
+    fun noteConnected(info: WatchInfo) {
+        val w = saved.firstOrNull()
+        if (w != null && w.host == info.host && w.port == info.port && w.serial == info.serial) return
+        prefs.remember(SavedWatch(info.host, info.port, info.model, info.serial, System.currentTimeMillis()))
+        saved = prefs.watches
     }
 
     fun disconnect() {
@@ -219,7 +262,7 @@ class SyndesiaState(private val ctx: Context) {
             // adbd restarts on the watch; give it a moment, then reconnect on the new port.
             delay(3000)
             hotspotStage = null
-            tried.clear()
+            misses.clear()
             hunting = null
             val r = Adb.connect(ctx, info.host, 5555)
             val now = r.getOrNull()
@@ -323,30 +366,162 @@ class SyndesiaState(private val ctx: Context) {
         }
     }
 
-    /** First launch / resume: reconnect to the last watch. */
+    // ------------------------------------------------------------------ auto-connect
+
+    /**
+     * Syndesia is on screen: look for the saved watch until it's connected, and again whenever the
+     * link is lost for good. One loop does all of it, so nothing depends on catching a single mDNS
+     * event at the right moment.
+     */
     fun autoStart() {
-        if (!autoConnect || Adb.userDisconnected) return
-        val l = Adb.link.value
-        if (l !is Link.Idle) return
-        val last = saved.firstOrNull() ?: return
-        Helper.wakeAsync(ctx)
-        if ("${last.host}:${last.port}" in tried) { hunting = last; return }
-        doConnect(last.host, last.port)
+        if (seeker?.isActive == true) return
+        val job = scope.launch(start = CoroutineStart.LAZY) {
+            val me = coroutineContext[Job]
+            try {
+                seek()
+            } finally {
+                if (seeker === me) seeking = null
+            }
+        }
+        seeker = job
+        job.start()
     }
 
-    /** mDNS saw something: if it's a saved watch we're not connected to, connect. */
-    fun onFound(found: List<Found>) {
-        if (!autoConnect || Adb.userDisconnected || hotspotStage != null) return
-        val l = Adb.link.value
-        if (l is Link.Connected || l is Link.Connecting) return
-        if (l is Link.Failed && l.needsPairing) return
-        for (f in found) {
-            val port = f.connectPort ?: continue
-            val match = saved.firstOrNull { (it.serial.isNotBlank() && it.serial == f.serial) || it.host == f.host } ?: continue
-            if (hunting != null && hunting != match && saved.firstOrNull() != match) continue
-            if ("${f.host}:$port" in tried) continue
-            doConnect(f.host, port)
-            return
+    /** Syndesia left the screen: stop looking. (A link that's already up is kept by LinkService.) */
+    fun autoStop() {
+        seeker?.cancel()
+        seeker = null
+        seeking = null
+    }
+
+    /** Auto-connect only acts while nothing is connected and the user isn't in the middle of connecting some other way. */
+    private fun autoAllowed(l: Link): Boolean =
+        autoConnect && !Adb.userDisconnected && saved.isNotEmpty() &&
+            hotspotStage == null && !pairing && pairRequest == null && connectRequest == null &&
+            (l is Link.Idle || (l is Link.Failed && !l.needsPairing))
+
+    /** Still inside the rest an address gets after connecting to it failed? The rest grows with each miss. */
+    private fun resting(host: String, port: Int): Boolean {
+        val m = misses["$host:$port"] ?: return false
+        val rest = when (m.count) {
+            1 -> 8_000L
+            2 -> 30_000L
+            3 -> 120_000L
+            else -> 600_000L
+        }
+        return SystemClock.elapsedRealtime() - m.at < rest
+    }
+
+    /**
+     * One automatic connect, to a port that's known to be open. It runs to the end even if the app
+     * leaves the screen meanwhile, so a connect that succeeds is always recorded.
+     */
+    private suspend fun auto(host: String, port: Int): Boolean {
+        if (!autoAllowed(Adb.link.value)) return false
+        return scope.async { settle(host, port, Adb.connect(ctx, host, port, byUser = false)) }.await()
+    }
+
+    private suspend fun seek() {
+        var began = 0L // when this hunt started; 0 between hunts
+        var round = 0
+        var wakes = 0
+        var lastWake = 0L
+        var scans = 0
+        var lastScan = 0L
+        while (true) {
+            try {
+                val l = Adb.link.value
+                if (l is Link.Connected || l is Link.Connecting) {
+                    // Nothing to do while a link is up or coming up. (Adb itself retries a dropped one for a while.)
+                    seeking = null
+                    began = 0L
+                    Adb.link.first { it is Link.Idle || it is Link.Failed }
+                    continue
+                }
+                if (!autoAllowed(l)) {
+                    seeking = null
+                    began = 0L
+                    delay(1000)
+                    continue
+                }
+                if (began == 0L) {
+                    began = SystemClock.elapsedRealtime()
+                    round = 0
+                    wakes = 0
+                    scans = 0
+                }
+                val target = hunting?.let { h -> saved.firstOrNull { it.host == h.host && it.serial == h.serial } } ?: saved.first()
+                if (seeking == null) seeking = "Looking for ${target.model}…"
+
+                // The watch's Wi-Fi is usually asleep while Bluetooth is connected: nudge it awake, a few times at most.
+                val t = SystemClock.elapsedRealtime()
+                if (wakes == 0 || (wakes < 4 && t - lastWake > 25_000)) {
+                    wakes++
+                    lastWake = t
+                    Helper.wakeAsync(ctx)
+                }
+
+                Discovery.refresh()
+                val adverts = Discovery.found.value
+                val spots = buildList {
+                    // Where mDNS says the watch is now: its port changes whenever Wireless debugging restarts…
+                    adverts.firstOrNull { target.isAt(it) }?.let { f -> f.connectPort?.let { add(f.host to it) } }
+                    // …then where it was last time…
+                    add(target.host to target.port)
+                    // …then any other saved watch that's advertising, unless we're after one in particular.
+                    if (hunting == null) for (f in adverts) {
+                        val p = f.connectPort ?: continue
+                        if (saved.any { it.isAt(f) }) add(f.host to p)
+                    }
+                }.distinct()
+
+                var connected = false
+                var shut: String? = null // an address where the watch answers, but not on any port we know
+                for ((host, port) in spots) {
+                    if (resting(host, port)) continue
+                    // A quick knock first: only a port that's open gets a real connect, so looking
+                    // for a watch that isn't there never flashes "Connecting…" and an error.
+                    when (withContext(Dispatchers.IO) { PortScan.knock(host, port) }) {
+                        PortState.Open -> connected = auto(host, port)
+                        PortState.Closed -> if (shut == null && (host == target.host || adverts.any { it.host == host && target.isAt(it) })) shut = host
+                        PortState.Unreachable -> {}
+                    }
+                    if (connected || !autoAllowed(Adb.link.value)) break
+                }
+                if (connected || !autoAllowed(Adb.link.value)) continue
+
+                // The watch is on Wi-Fi but not listening where mDNS or memory says. If mDNS has had
+                // its chance, find the port directly (a new one is picked whenever debugging restarts).
+                val there = shut
+                val sinceScan = SystemClock.elapsedRealtime() - lastScan
+                if (there != null && round >= 1 && scans < 4 && (scans == 0 || sinceScan > (if (scans < 2) 20_000 else 60_000))) {
+                    scans++
+                    seeking = "Finding ${target.model}'s new port…"
+                    val ports = PortScan.findAdb(there)
+                    lastScan = SystemClock.elapsedRealtime()
+                    for (p in ports) {
+                        if (resting(there, p)) continue
+                        connected = auto(there, p)
+                        if (connected || !autoAllowed(Adb.link.value)) break
+                    }
+                    if (connected || !autoAllowed(Adb.link.value)) continue
+                }
+
+                seeking = if (SystemClock.elapsedRealtime() - began < 60_000) "Looking for ${target.model}…"
+                else "Still looking for ${target.model}. Check it's on this Wi-Fi with Wireless debugging on."
+                // Go again as soon as mDNS has news, or after a pause that grows while nothing turns up.
+                val pause = when {
+                    round < 10 -> 2000L
+                    round < 30 -> 4000L
+                    else -> 10_000L
+                }
+                if (withTimeoutOrNull(pause) { Discovery.found.first { it != adverts } } != null) delay(300)
+                round++
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                delay(3000) // never let a hiccup here take the app down; just try again
+            }
         }
     }
 
@@ -427,12 +602,14 @@ fun SyndesiaApp(onReplayTour: () -> Unit) {
     val incoming by Incoming.uris.collectAsStateWithLifecycle()
 
     LifecycleResumeEffect(Unit) {
-        Discovery.start(ctx)
+        Discovery.hold(ctx, "app")
         st.refreshHelper()
         st.autoStart()
-        onPauseOrDispose { Discovery.stop() }
+        onPauseOrDispose {
+            st.autoStop()
+            Discovery.release("app")
+        }
     }
-    LaunchedEffect(found) { st.onFound(found) }
     LaunchedEffect(incoming) {
         if (incoming.isNotEmpty()) st.accept(Incoming.take()) { tab = it }
     }
@@ -442,6 +619,7 @@ fun SyndesiaApp(onReplayTour: () -> Unit) {
     LaunchedEffect(isConnected) {
         if (!isConnected) { st.refreshHelper(); return@LaunchedEffect }
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        Adb.connected?.let { st.noteConnected(it) }
         // Pick up installs a dropped connection interrupted.
         Installer.resumeInterrupted()
         // Keep the link alive in the background until the user disconnects or closes the app.
