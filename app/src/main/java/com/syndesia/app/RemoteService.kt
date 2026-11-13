@@ -235,15 +235,12 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
                         main.postDelayed({ privateAuth(0, done) }, 700)
                         return
                     }
-                    if (++tries > 8) return done("notfound")
-                    // Zip straight to the bottom of the app list, where Private space sits.
-                    if (zipToBottom(root) == 0 && tries > 2) {
-                        swipe(screenW / 2f, screenH * 0.8f, screenW / 2f, screenH * 0.1f, 60)
-                    }
-                    main.postDelayed(this, 180)
+                    if (++tries > 4) return done("notfound")
+                    // Fling straight to the bottom of the app list, where Private space sits.
+                    zipToBottom { main.post(this) }
                 }
             }
-            main.postDelayed(look, 450)
+            main.postDelayed(look, 400)
         }, 350)
     }
 
@@ -340,12 +337,20 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
         return null
     }
 
-    /** Scrolls the app drawer all the way down at once. Returns how many pages it moved. */
-    private fun zipToBottom(root: AccessibilityNodeInfo?): Int {
-        val list = root?.let { findScrollable(it) } ?: return 0
+    /**
+     * Gets to the bottom of the app drawer fast: a few hard flicks in a row (the drawer's own
+     * scroll action glides a page at a time, which is slow), then lets it settle.
+     */
+    private fun zipToBottom(then: () -> Unit) {
         var n = 0
-        while (n < 40 && list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) n++
-        return n
+        val flick = object : Runnable {
+            override fun run() {
+                if (n++ >= 4) { main.postDelayed(then, 450); return }
+                swipe(screenW / 2f, screenH * 0.86f, screenW / 2f, screenH * 0.14f, 28)
+                main.postDelayed(this, 95)
+            }
+        }
+        main.post(flick)
     }
 
     private fun label(n: AccessibilityNodeInfo): String =
@@ -409,7 +414,6 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
         val step = object : Runnable {
             override fun run() {
                 val root = rootInActiveWindow ?: return then(names.toList())
-                if (rounds == 0) zipToBottom(root)
                 val (sawHeader, tiles) = privateTiles(root)
                 tiles.forEach { names.add(it.first) }
                 // Header visible: we've seen the whole section. Otherwise page back up toward it.
@@ -420,7 +424,7 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
                 main.postDelayed(this, 200)
             }
         }
-        main.postDelayed(step, 150)
+        zipToBottom { main.post(step) }
     }
 
     /** Taps a Private space app by name. */
@@ -429,7 +433,6 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
         val step = object : Runnable {
             override fun run() {
                 val root = rootInActiveWindow ?: return then(false)
-                if (rounds == 0) zipToBottom(root)
                 val (sawHeader, tiles) = privateTiles(root)
                 tiles.firstOrNull { it.first.equals(name, ignoreCase = true) }?.let { clickNode(it.second); return then(true) }
                 val list = findScrollable(root)
@@ -437,7 +440,7 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
                 main.postDelayed(this, 200)
             }
         }
-        main.postDelayed(step, 150)
+        zipToBottom { main.post(step) }
     }
 
     private fun rootsNow(): List<AccessibilityNodeInfo> = buildList {

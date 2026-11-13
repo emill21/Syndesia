@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.15.1 — 2026-11-12 · Faster jump to Private space
+
+- Private space and Private apps really jump to the bottom of the app list now: a few quick flicks instead of the list's slow page-by-page scroll
+- Update the phone app to get this
+
 ## 1.15 — 2026-11-12 · Faster Private space
 
 - Unlock phone with the screen off: Syndesia now waits for the screen to come on, then swipes up and types your PIN (it tries the swipe a few times if the lock screen isn't ready)
