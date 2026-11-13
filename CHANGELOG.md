@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.16 — 2026-11-12 · Select several
+
+- Select several files: in the phone's Files tab (your watch's storage), hold a file or folder to start selecting, then tap more. Save them all to the phone, move or copy them to another folder on the watch (open the folder, then tap Move here or Paste here), or delete them together. With one picked, More… shows rename, preview and install
+- On the watch, Send to phone works the same way: hold a file to pick several, then send them all to your phone or delete them
+- Update both the phone app and the watch app to get these
+
 ## 1.15.3 — 2026-11-12 · Search fix
 
 - Fixed: jumping to Private space could still open the app drawer's search. Syndesia now waits for the app list to open, flicks only inside it, stops as soon as it reaches the bottom (an extra flick there was opening search), and closes search if it pops up anyway

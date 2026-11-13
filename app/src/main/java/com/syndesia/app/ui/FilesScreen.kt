@@ -33,6 +33,10 @@ import androidx.compose.material.icons.rounded.Audiotrack
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.RadioButtonUnchecked
+import androidx.compose.material.icons.rounded.DriveFileMove
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DriveFileRenameOutline
 import androidx.compose.material.icons.rounded.Error
@@ -49,6 +53,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -97,6 +103,11 @@ private val shortcuts = listOf(
     "Root" to "/",
 )
 
+/** Files picked to copy or move on the watch; survives switching folders. */
+object FileClip {
+    val items = kotlinx.coroutines.flow.MutableStateFlow<Pair<List<RemoteFile>, Boolean>?>(null)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FilesScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: (STab) -> Unit) {
@@ -126,6 +137,14 @@ fun FilesScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: (S
     var deleting by remember { mutableStateOf<RemoteFile?>(null) }
     val connected = link is Link.Connected
     val path = st.filesPath
+    // Multi-select: hold a file or folder to start, tap to add more.
+    val chosen = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    val selecting = chosen.isNotEmpty()
+    var deletingMany by remember { mutableStateOf<List<RemoteFile>?>(null) }
+    var busy by remember { mutableStateOf<String?>(null) }
+    val clip by FileClip.items.collectAsStateWithLifecycle()
+    LaunchedEffect(path) { chosen.clear() }
+    androidx.activity.compose.BackHandler(enabled = selecting) { chosen.clear() }
 
     val upload = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) Transfers.upload(ctx, uris, path)
@@ -141,7 +160,48 @@ fun FilesScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: (S
     }
 
     fun open(f: RemoteFile) {
+        if (selecting) { if (f.path in chosen) chosen.remove(f.path) else chosen.add(f.path); return }
         if (f.isDir || f.isLink) st.filesPath = f.path else selected = f
+    }
+
+    fun picked(): List<RemoteFile> = entries.orEmpty().filter { it.path in chosen }
+
+    /** Save every picked file, and everything inside picked folders, to the phone. */
+    fun saveMany(list: List<RemoteFile>) {
+        chosen.clear()
+        scope.launch {
+            var n = 0
+            for (f in list) {
+                if (f.isDir || f.isLink) {
+                    busy = "Reading ${f.name}…"
+                    val all = runCatching { Watch.walk(f.path) }.getOrElse { emptyList() }
+                    val base = f.name.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                    all.forEach { (file, rel) -> Transfers.download(ctx, file, subfolder = if (rel.isEmpty()) base else "$base/$rel"); n++ }
+                } else { Transfers.download(ctx, f); n++ }
+            }
+            busy = null
+            ctx.toast("Saving $n ${if (n == 1) "file" else "files"} — progress is under Transfers")
+        }
+    }
+
+    /** Copy or move what's on the clipboard into this folder. */
+    fun paste() {
+        val (list, move) = clip ?: return
+        val dest = path.trimEnd('/').ifBlank { "/" }
+        scope.launch {
+            var failed = 0
+            list.forEachIndexed { i, f ->
+                busy = "${if (move) "Moving" else "Copying"} ${i + 1} of ${list.size}…"
+                val target = (if (dest == "/") "" else dest) + "/" + f.name
+                if (target == f.path) return@forEachIndexed
+                val err = runCatching { if (move) Watch.rename(f.path, target) else Watch.copy(f.path, dest) }.getOrElse { it.message }
+                if (err != null) failed++
+            }
+            busy = null
+            FileClip.items.value = null
+            ctx.toast(if (failed == 0) "${if (move) "Moved" else "Copied"} ${list.size}" else "$failed couldn't be ${if (move) "moved" else "copied"}")
+            reload++
+        }
     }
 
     fun up() {
@@ -224,6 +284,64 @@ fun FilesScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: (S
                 }
             }
         }
+        clip?.let { (list, move) ->
+            item {
+                SectionCard {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "${if (move) "Move" else "Copy"} ${list.size} ${if (list.size == 1) "item" else "items"} here?",
+                            style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = { FileClip.items.value = null }) { Text("Cancel") }
+                        Button(onClick = { paste() }, enabled = busy == null) { Text(if (move) "Move here" else "Paste here") }
+                    }
+                }
+            }
+        }
+        if (selecting) {
+            item {
+                val list = picked()
+                SectionCard {
+                    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("${chosen.size} selected", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                        TextButton(onClick = {
+                            val all = shown.orEmpty().map { it.path }
+                            if (chosen.size == all.size) chosen.clear() else { chosen.clear(); chosen.addAll(all) }
+                        }) { Text(if (chosen.size == shown.orEmpty().size) "None" else "All") }
+                        IconButton(onClick = { chosen.clear() }) { Icon(Icons.Rounded.Close, "Stop selecting") }
+                    }
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilledTonalButton(onClick = { saveMany(list) }) {
+                            Icon(Icons.Rounded.Download, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Save")
+                        }
+                        FilledTonalButton(onClick = {
+                            FileClip.items.value = list to true; chosen.clear()
+                            ctx.toast("Open the folder they should go to, then tap Move here")
+                        }) { Icon(Icons.Rounded.DriveFileMove, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Move") }
+                        FilledTonalButton(onClick = {
+                            FileClip.items.value = list to false; chosen.clear()
+                            ctx.toast("Open the folder to copy them to, then tap Paste here")
+                        }) { Icon(Icons.Rounded.ContentCopy, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Copy") }
+                        FilledTonalButton(
+                            onClick = { deletingMany = list },
+                            colors = ButtonDefaults.filledTonalButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                        ) { Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Delete") }
+                        if (list.size == 1) OutlinedButton(onClick = { selected = list[0]; chosen.clear() }) { Text("More…") }
+                    }
+                }
+            }
+        }
+        busy?.let { b ->
+            item {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(10.dp))
+                    Text(b, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
         if (transfers.isNotEmpty()) item { TransfersCard(transfers) }
         when {
             shown == null -> item {
@@ -239,13 +357,17 @@ fun FilesScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: (S
                 item { SectionHeader("${shown.size} ${if (shown.size == 1) "item" else "items"}") }
                 item {
                     Text(
-                        "Tip: long-press a folder to save all of it.",
+                        "Tip: hold a file or folder to select several, then save, move, copy or delete them.",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 4.dp),
                     )
                 }
-                items(shown, key = { it.path }) { f -> FileRow(f, onLongClick = { selected = f }) { open(f) } }
+                items(shown, key = { it.path }) { f ->
+                    FileRow(f, picked = if (selecting) f.path in chosen else null, onLongClick = {
+                        if (f.path !in chosen) chosen.add(f.path)
+                    }) { open(f) }
+                }
             }
         }
     }
@@ -329,6 +451,28 @@ fun FilesScreen(st: SyndesiaState, link: Link, padding: PaddingValues, onTab: (S
         }, onDismiss = { renaming = null })
     }
 
+    deletingMany?.let { list ->
+        ConfirmDialog(
+            "Delete ${list.size} ${if (list.size == 1) "item" else "items"}?",
+            "They'll be deleted from the watch" + (if (list.any { it.isDir }) ", folders with everything in them." else "."),
+            "Delete",
+            onConfirm = {
+                chosen.clear()
+                scope.launch {
+                    var failed = 0
+                    list.forEachIndexed { i, f ->
+                        busy = "Deleting ${i + 1} of ${list.size}…"
+                        if (runCatching { Watch.delete(f.path) }.getOrElse { it.message } != null) failed++
+                    }
+                    busy = null
+                    if (failed > 0) ctx.toast("$failed couldn't be deleted")
+                    reload++
+                }
+            },
+            onDismiss = { deletingMany = null },
+        )
+    }
+
     deleting?.let { f ->
         ConfirmDialog(
             "Delete ${f.name}?", if (f.isDir) "The folder and everything in it will be deleted from the watch." else "It will be deleted from the watch.",
@@ -369,15 +513,22 @@ private fun iconFor(f: RemoteFile): ImageVector {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun FileRow(f: RemoteFile, onLongClick: () -> Unit, onClick: () -> Unit) {
+private fun FileRow(f: RemoteFile, picked: Boolean? = null, onLongClick: () -> Unit, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
     Card(
         shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = colors.surfaceContainerLow),
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).combinedClickable(onLongClick = onLongClick, onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = if (picked == true) colors.secondaryContainer else colors.surfaceContainerLow),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).combinedClickable(onLongClick = {
+            haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); onLongClick()
+        }, onClick = onClick),
     ) {
         Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconBadge(iconFor(f), if (f.isDir || f.isLink) colors.primary else colors.tertiary, 40.dp)
+            when (picked) {
+                true -> IconBadge(Icons.Rounded.CheckCircle, colors.primary, 40.dp)
+                false -> IconBadge(Icons.Rounded.RadioButtonUnchecked, colors.outline, 40.dp)
+                null -> IconBadge(iconFor(f), if (f.isDir || f.isLink) colors.primary else colors.tertiary, 40.dp)
+            }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(f.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)

@@ -10,6 +10,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Send
+import androidx.compose.material.icons.rounded.RadioButtonUnchecked
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.InsertDriveFile
 import androidx.compose.material.icons.rounded.Audiotrack
@@ -77,7 +81,13 @@ private fun Browser(onDone: () -> Unit) {
     val ctx = LocalContext.current
     var path by rememberSaveable { mutableStateOf(ROOT) }
     val allowed = remember { Environment.isExternalStorageManager() }
-    val entries = remember(path, allowed) {
+    var version by remember { mutableStateOf(0) }
+    var selecting by remember(path) { mutableStateOf(false) }
+    val chosen = remember(path) { androidx.compose.runtime.mutableStateListOf<String>() }
+    var confirmDelete by remember(path) { mutableStateOf(false) }
+    fun endSelect() { selecting = false; chosen.clear(); confirmDelete = false }
+    BackHandler(enabled = selecting) { endSelect() }
+    val entries = remember(path, allowed, version) {
         if (!allowed) emptyList()
         else File(path).listFiles()?.filter { !it.name.startsWith(".") }
             ?.sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase() }).orEmpty()
@@ -116,26 +126,94 @@ private fun Browser(onDone: () -> Unit) {
                     label = { Text("Up") },
                 )
             }
+            if (selecting) {
+                item {
+                    Button(
+                        onClick = {
+                            val files = entries.filter { it.absolutePath in chosen && it.isFile }
+                            files.forEach { Phone.send(ctx, it) }
+                            Toast.makeText(ctx, "Sending ${files.size} to your phone", Toast.LENGTH_SHORT).show()
+                            endSelect()
+                            onDone()
+                        },
+                        enabled = chosen.isNotEmpty(),
+                        modifier = Modifier.fillMaxWidth(),
+                        icon = { Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = null) },
+                        label = { Text("Send ${chosen.size} to phone") },
+                    )
+                }
+                item {
+                    FilledTonalButton(
+                        onClick = {
+                            if (!confirmDelete) { confirmDelete = true; return@FilledTonalButton }
+                            val gone = entries.filter { it.absolutePath in chosen }.count { it.deleteRecursively() }
+                            Toast.makeText(ctx, "Deleted $gone", Toast.LENGTH_SHORT).show()
+                            endSelect()
+                            version++
+                        },
+                        enabled = chosen.isNotEmpty(),
+                        modifier = Modifier.fillMaxWidth(),
+                        icon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
+                        label = { Text(if (confirmDelete) "Tap again to delete ${chosen.size}" else "Delete ${chosen.size}") },
+                    )
+                }
+                item {
+                    OutlinedButton(
+                        onClick = {
+                            confirmDelete = false
+                            val files = entries.filter { it.isFile }.map { it.absolutePath }
+                            if (chosen.size == files.size) chosen.clear() else { chosen.clear(); chosen.addAll(files) }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(if (chosen.size == entries.count { it.isFile } && chosen.isNotEmpty()) "Select none" else "Select all files") },
+                    )
+                }
+                item {
+                    OutlinedButton(onClick = { endSelect() }, modifier = Modifier.fillMaxWidth(), label = { Text("Done") })
+                }
+            } else if (entries.any { it.isFile }) item {
+                Text("Hold a file to pick several", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, textAlign = TextAlign.Center)
+            }
             if (entries.isEmpty()) item {
                 Text("Nothing here", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
             }
             items(entries, key = { it.absolutePath }) { f ->
                 if (f.isDirectory) {
                     FilledTonalButton(
-                        onClick = { path = f.absolutePath },
+                        onClick = { if (!selecting) path = f.absolutePath },
                         modifier = Modifier.fillMaxWidth(),
                         icon = { Icon(iconFor(f), contentDescription = null) },
                         label = { Text(f.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
                     )
                 } else {
-                    Button(
-                        onClick = {
+                    val picked = selecting && f.absolutePath in chosen
+                    val tap: () -> Unit = {
+                        if (selecting) {
+                            confirmDelete = false
+                            if (picked) chosen.remove(f.absolutePath) else chosen.add(f.absolutePath)
+                        } else {
                             Phone.send(ctx, f)
                             Toast.makeText(ctx, "Sending ${f.name}", Toast.LENGTH_SHORT).show()
                             onDone()
-                        },
+                        }
+                    }
+                    val hold: () -> Unit = {
+                        confirmDelete = false
+                        if (!selecting) { selecting = true; chosen.clear() }
+                        if (f.absolutePath !in chosen) chosen.add(f.absolutePath)
+                    }
+                    if (selecting && !picked) FilledTonalButton(
+                        onClick = tap,
+                        onLongClick = hold,
                         modifier = Modifier.fillMaxWidth(),
-                        icon = { Icon(iconFor(f), contentDescription = null) },
+                        icon = { Icon(Icons.Rounded.RadioButtonUnchecked, contentDescription = null) },
+                        secondaryLabel = { Text(size(f.length())) },
+                        label = { Text(f.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                    ) else Button(
+                        onClick = tap,
+                        onLongClick = hold,
+                        modifier = Modifier.fillMaxWidth(),
+                        icon = { Icon(if (picked) Icons.Rounded.CheckCircle else iconFor(f), contentDescription = null) },
                         secondaryLabel = { Text(size(f.length())) },
                         label = { Text(f.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
                     )

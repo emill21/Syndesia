@@ -186,6 +186,7 @@ object Watch {
 
     suspend fun mkdir(path: String): String? = Adb.sh("mkdir -p ${Adb.q(path)}").trim().ifBlank { null }
     suspend fun delete(path: String): String? = Adb.sh("rm -rf ${Adb.q(path)}").trim().ifBlank { null }
+    suspend fun copy(from: String, toDir: String): String? = Adb.sh("cp -r ${Adb.q(from)} ${Adb.q(toDir.trimEnd('/') + "/")}").trim().ifBlank { null }
     suspend fun rename(from: String, to: String): String? = Adb.sh("mv ${Adb.q(from)} ${Adb.q(to)}").trim().ifBlank { null }
 
     suspend fun reboot() { runCatching { Adb.sh("reboot") } }
