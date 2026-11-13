@@ -53,6 +53,8 @@ class PhoneListener : WearableListenerService() {
                 }
             }
             "/syndesia/hidrelay/stop" -> HidRelayService.stop(this)
+            PhoneFiles.PATH_LIST -> PhoneFiles.list(this, event.sourceNodeId, body)
+            PhoneFiles.PATH_GET -> PhoneFiles.get(this, event.sourceNodeId, body)
         }
     }
 

@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.13",
+    "date": "2026-11-12",
+    "title": "Phone files",
+    "items": [
+      "Phone files: a new button on the watch opens Arkheia on your phone's files, so you can browse your phone from your wrist and copy files to the watch, over Bluetooth",
+      "On the phone, Settings › Watch remote › Browse phone files from the watch turns on All files access, which it needs. If it's off, the phone shows a notification the first time the watch asks",
+      "Needs Arkheia 1.7 or newer on the watch. Update both the phone app and the watch app"
+    ]
+  },
+  {
     "version": "1.12",
     "date": "2026-11-12",
     "title": "Private space",

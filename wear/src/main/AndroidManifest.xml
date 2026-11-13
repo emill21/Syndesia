@@ -24,6 +24,11 @@
         android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
 
+    <!-- Open Arkheia on the phone's files. -->
+    <queries>
+        <package android:name="com.arkheia.app" />
+    </queries>
+
     <application
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -119,5 +124,10 @@
             android:name=".WifiKeeper"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
+        <!-- The phone's files, for Arkheia. Callers are checked by package. -->
+        <provider
+            android:name=".PhoneFilesProvider"
+            android:authorities="com.syndesia.app.phonefiles"
+            android:exported="true" />
     </application>
 </manifest>

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.13 — 2026-11-12 · Phone files
+
+- Phone files: a new button on the watch opens Arkheia on your phone's files, so you can browse your phone from your wrist and copy files to the watch, over Bluetooth
+- On the phone, Settings › Watch remote › Browse phone files from the watch turns on All files access, which it needs. If it's off, the phone shows a notification the first time the watch asks
+- Needs Arkheia 1.7 or newer on the watch. Update both the phone app and the watch app
+
 ## 1.12 — 2026-11-12 · Private space
 
 - Private space: a new button in the watch remote opens Private space on your phone. It opens the app list, scrolls to Private and taps it, and types your saved PIN if it asks (or use your fingerprint)

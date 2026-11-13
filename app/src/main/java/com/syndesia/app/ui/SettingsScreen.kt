@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.BluetoothSearching
 import androidx.compose.material.icons.rounded.Computer
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Mouse
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -128,6 +129,7 @@ fun SettingsScreen(
                     ctx.openSafely(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                 }
                 UnlockPinRow()
+                PhoneFilesRow()
             }
         }
 
@@ -303,4 +305,22 @@ private fun UnlockPinRow() {
             }) { Text("Remove") }
         },
     )
+}
+
+
+/** All files access, so Arkheia on the watch can browse this phone. */
+@Composable
+private fun PhoneFilesRow() {
+    val ctx = LocalContext.current
+    var on by remember { mutableStateOf(com.syndesia.app.PhoneFiles.hasAccess()) }
+    LifecycleResumeEffect(Unit) {
+        on = com.syndesia.app.PhoneFiles.hasAccess()
+        onPauseOrDispose { }
+    }
+    LinkRow(
+        Icons.Rounded.FolderOpen,
+        if (on) "Phone files on the watch are on" else "Browse phone files from the watch",
+        if (on) "Arkheia on your watch can open this phone's storage over Bluetooth (Syndesia on the watch › Phone files)."
+        else "Allow All files access so Arkheia on your watch can browse and copy this phone's files over Bluetooth.",
+    ) { ctx.openSafely(com.syndesia.app.PhoneFiles.accessIntent(ctx)) }
 }

@@ -16,6 +16,7 @@ class WakeListener : WearableListenerService() {
             PATH_RELEASE -> WifiHold.release(this)
             Phone.PATH_REPLY -> Phone.onReply(event.data)
             "/syndesia/hidrelay" -> Pointer.onPhoneReply(event.data)
+            PhoneFs.PATH_REPLY -> PhoneFs.onReply(event.data)
             PATH_PING -> runCatching {
                 val id = org.json.JSONObject(String(event.data, Charsets.UTF_8)).getString("id")
                 val v = packageManager.getPackageInfo(packageName, 0).longVersionCode
@@ -28,6 +29,7 @@ class WakeListener : WearableListenerService() {
 
     override fun onChannelOpened(channel: ChannelClient.Channel) {
         if (channel.path == Receiver.PATH_CHANNEL) Receiver.accept(this, channel)
+        if (channel.path == PhoneFs.PATH_DATA) PhoneFs.accept(this, channel)
     }
 
     companion object {

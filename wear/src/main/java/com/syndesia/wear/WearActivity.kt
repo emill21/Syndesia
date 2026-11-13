@@ -17,6 +17,7 @@ import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Computer
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Link
@@ -141,6 +142,15 @@ private fun Home(onScreenshot: () -> Unit) {
                     icon = { Icon(Icons.Rounded.Computer, contentDescription = null) },
                     secondaryLabel = { Text("Bluetooth mouse + keyboard") },
                     label = { Text("Computer mouse") },
+                )
+            }
+            item {
+                FilledTonalButton(
+                    onClick = { openPhoneFiles(ctx) },
+                    modifier = Modifier.fillMaxWidth(),
+                    icon = { Icon(Icons.Rounded.FolderOpen, contentDescription = null) },
+                    secondaryLabel = { Text("Browse in Arkheia") },
+                    label = { Text("Phone files") },
                 )
             }
             item {
@@ -286,4 +296,19 @@ private fun StatusButton(icon: @Composable () -> Unit, title: String, value: Str
         secondaryLabel = { Text(value) },
         label = { Text(title) },
     )
+}
+
+
+/** Opens Arkheia straight on the phone's files. */
+fun openPhoneFiles(ctx: android.content.Context) {
+    val i = ctx.packageManager.getLaunchIntentForPackage("com.arkheia.app")
+    if (i == null) {
+        android.widget.Toast.makeText(ctx, "Install Arkheia on your watch first", android.widget.Toast.LENGTH_LONG).show()
+        return
+    }
+    runCatching {
+        ctx.startActivity(i.putExtra("phone", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.onFailure {
+        android.widget.Toast.makeText(ctx, "Couldn't open Arkheia", android.widget.Toast.LENGTH_SHORT).show()
+    }
 }

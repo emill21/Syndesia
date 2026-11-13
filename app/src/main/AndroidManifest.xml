@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- ADB over Wi-Fi to the watch, and finding it with mDNS. -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -19,6 +20,10 @@
         android:name="android.permission.ACCESS_COARSE_LOCATION"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Lets the watch browse this phone's files (Arkheia › Phone), when you allow it. -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
 
     <!-- Keeps the watch link alive while Syndesia is in the background (file picker, other apps). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
