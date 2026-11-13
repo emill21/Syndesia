@@ -346,7 +346,9 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
         val flick = object : Runnable {
             override fun run() {
                 if (n++ >= 4) { main.postDelayed(then, 450); return }
-                swipe(screenW / 2f, screenH * 0.86f, screenW / 2f, screenH * 0.14f, 28)
+                // Start mid-list: Pixel's drawer has its search bar along the bottom, and a flick
+                // that starts there opens search instead of scrolling.
+                swipe(screenW / 2f, screenH * 0.68f, screenW / 2f, screenH * 0.18f, 28)
                 main.postDelayed(this, 95)
             }
         }

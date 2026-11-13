@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.15.2",
+    "date": "2026-11-12",
+    "title": "No more search",
+    "items": [
+      "Fixed: jumping down to Private space tapped the app drawer's search bar. The flicks now start in the middle of the app list",
+      "Update the phone app to get this"
+    ]
+  },
+  {
     "version": "1.15.1",
     "date": "2026-11-12",
     "title": "Faster jump to Private space",

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.15.2 — 2026-11-12 · No more search
+
+- Fixed: jumping down to Private space tapped the app drawer's search bar. The flicks now start in the middle of the app list
+- Update the phone app to get this
+
 ## 1.15.1 — 2026-11-12 · Faster jump to Private space
 
 - Private space and Private apps really jump to the bottom of the app list now: a few quick flicks instead of the list's slow page-by-page scroll
