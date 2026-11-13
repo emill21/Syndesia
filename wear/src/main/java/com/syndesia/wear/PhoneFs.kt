@@ -102,7 +102,7 @@ object PhoneFs {
             val waiter = header?.optString("id")?.let { gets[it] }
             if (waiter == null) { runCatching { client.close(channel).await() }; return@launch }
             // Hand the open stream over; the copier below reads the rest.
-            streams[header.optString("id")] = input
+            streams[header.optString("id")] = input ?: return@launch
             waiter.complete(channel to header.optLong("size", -1))
         }
     }
