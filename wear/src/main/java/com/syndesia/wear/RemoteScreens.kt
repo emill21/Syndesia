@@ -146,6 +146,15 @@ private fun Panel() {
             item { UnlockButton() }
             item { PrivateSpaceButton() }
             item {
+                FilledTonalButton(
+                    onClick = { ctx.startActivity(Intent(ctx, PrivateAppsActivity::class.java)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    icon = { Icon(Icons.Rounded.Shield, contentDescription = null) },
+                    secondaryLabel = { Text("Open an app in Private space") },
+                    label = { Text("Private apps") },
+                )
+            }
+            item {
                 Button(
                     onClick = { ctx.startActivity(Intent(ctx, MouseActivity::class.java)) },
                     modifier = Modifier.fillMaxWidth(),
@@ -522,6 +531,91 @@ private fun AppList() {
                         label = { Text(a.label, maxLines = 2, overflow = TextOverflow.Ellipsis) },
                     )
                 }
+            }
+        }
+    }
+}
+
+// =================================================================== private space apps
+
+class PrivateAppsActivity : RemoteScreenActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent { SyndesiaWearTheme { AppScaffold { PrivateAppList() } } }
+    }
+}
+
+@Composable
+private fun PrivateAppList() {
+    val ctx = LocalContext.current
+    val result by Remote.privateApps.collectAsStateWithLifecycle()
+    val opened by Remote.privateOpen.collectAsStateWithLifecycle()
+    var opening by remember { mutableStateOf<String?>(null) }
+    var timedOut by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        Remote.loadPrivateApps(ctx)
+        delay(25_000)
+        if (Remote.privateApps.value == null) timedOut = true
+    }
+    LaunchedEffect(opened, opening) {
+        val o = opened ?: return@LaunchedEffect
+        val name = opening ?: return@LaunchedEffect
+        opening = null
+        Toast.makeText(
+            ctx,
+            when (o) {
+                "ok" -> "Opened $name"
+                "notfound" -> "Couldn't find $name in Private space"
+                "locked" -> "Unlock your phone first"
+                "needpin" -> "Private space wants your PIN. Save it in Syndesia › Settings, or use your fingerprint"
+                else -> "Couldn't open Private space"
+            },
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
+    val listState = rememberScalingLazyListState()
+    ScreenScaffold(scrollState = listState) { contentPadding ->
+        ScalingLazyColumn(state = listState, contentPadding = contentPadding, modifier = Modifier.fillMaxSize()) {
+            item { ListHeader { Text("Private space", color = MaterialTheme.colorScheme.primary) } }
+            val r = result
+            when {
+                r == null && timedOut -> item {
+                    Text("Phone didn't answer. Turn on the watch remote in Syndesia on your phone.", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                }
+                r == null -> item {
+                    Text("Opening Private space on your phone…", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                }
+                r.why == "ok" -> items(r.apps, key = { it }) { name ->
+                    FilledTonalButton(
+                        onClick = {
+                            opening = name
+                            Remote.openPrivateApp(ctx, name)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(if (opening == name) "Opening $name…" else name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                    )
+                }
+                else -> item {
+                    Text(
+                        when (r.why) {
+                            "empty" -> "No apps found in Private space."
+                            "locked" -> "Unlock your phone first."
+                            "notfound" -> "Couldn't find Private space in the app list. If it's hidden, turn off Hide when locked in its settings."
+                            "needpin" -> "Private space wants your PIN. Save it in Syndesia › Settings on your phone, or use your fingerprint, then try again."
+                            "unsupported" -> "Private space needs Android 15 or newer."
+                            else -> "Couldn't open Private space."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+            if (result != null || timedOut) item {
+                OutlinedButton(
+                    onClick = { timedOut = false; Remote.loadPrivateApps(ctx) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Refresh") },
+                )
             }
         }
     }

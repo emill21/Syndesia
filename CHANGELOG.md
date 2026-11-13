@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.14 — 2026-11-12 · Private apps
+
+- Private apps: a new button in the watch remote lists the apps in your phone's Private space and opens the one you tap. It opens Private space for you first, typing your saved PIN if it asks (or use your fingerprint)
+- Private space and Unlock no longer tap the Private header when Private space is already open, so they can't lock it by accident
+- Update both the phone app and the watch app
+
 ## 1.13 — 2026-11-12 · Phone files
 
 - Phone files: a new button on the watch opens Arkheia on your phone's files, so you can browse your phone from your wrist and copy files to the watch, over Bluetooth

@@ -41,6 +41,22 @@ object Remote {
     private val _unlock = MutableStateFlow<String?>(null)
     val unlock: StateFlow<String?> = _unlock.asStateFlow()
 
+    data class PrivateApps(val why: String, val apps: List<String>)
+    private val _privateApps = MutableStateFlow<PrivateApps?>(null)
+    val privateApps: StateFlow<PrivateApps?> = _privateApps.asStateFlow()
+    private val _privateOpen = MutableStateFlow<String?>(null)
+    val privateOpen: StateFlow<String?> = _privateOpen.asStateFlow()
+
+    fun loadPrivateApps(ctx: Context) {
+        _privateApps.value = null
+        send(ctx, "private_apps")
+    }
+
+    fun openPrivateApp(ctx: Context, name: String) {
+        _privateOpen.value = null
+        send(ctx, "private_open", JSONObject().put("name", name))
+    }
+
     private val _privateSpace = MutableStateFlow<String?>(null)
     val privateSpace: StateFlow<String?> = _privateSpace.asStateFlow()
 
@@ -74,6 +90,11 @@ object Remote {
             "torch" -> _torch.value = o.optBoolean("on")
             "typed" -> _typed.value = o.optBoolean("ok")
             "private" -> _privateSpace.value = o.optString("why", "opened")
+            "private_apps" -> _privateApps.value = PrivateApps(
+                o.optString("why"),
+                o.optJSONArray("apps")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty(),
+            )
+            "private_open" -> _privateOpen.value = o.optString("why")
             "unlocked" -> _unlock.value = o.optString("why", if (o.optBoolean("ok")) "unlocked" else "failed").let { w ->
                 if (w == "nopad") "nopad:" + o.optInt("seen") else w
             }
