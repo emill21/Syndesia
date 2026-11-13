@@ -338,21 +338,43 @@ class RemoteService : AccessibilityService(), MessageClient.OnMessageReceivedLis
     }
 
     /**
-     * Gets to the bottom of the app drawer fast: a few hard flicks in a row (the drawer's own
-     * scroll action glides a page at a time, which is slow), then lets it settle.
+     * Gets to the bottom of the app drawer fast: quick flicks inside the app list itself (the
+     * drawer's own scroll action glides a page at a time, which is slow). Never flicks once the list
+     * can't go further (an extra flick at the end can pop open search), never outside the list
+     * (that's where the search bar lives), and backs out of search if it opened anyway.
      */
     private fun zipToBottom(then: () -> Unit) {
         var n = 0
+        var waited = 0
         val flick = object : Runnable {
             override fun run() {
-                if (n++ >= 4) { main.postDelayed(then, 450); return }
-                // Start mid-list: Pixel's drawer has its search bar along the bottom, and a flick
-                // that starts there opens search instead of scrolling.
-                swipe(screenW / 2f, screenH * 0.68f, screenW / 2f, screenH * 0.18f, 28)
-                main.postDelayed(this, 95)
+                if (searchOpen()) {
+                    performGlobalAction(GLOBAL_ACTION_BACK)
+                    main.postDelayed(this, 300); return
+                }
+                val list = rootInActiveWindow?.let { findScrollable(it) }
+                if (list == null) {
+                    // Drawer still opening.
+                    if (waited++ < 10) main.postDelayed(this, 100) else then()
+                    return
+                }
+                val canGoDown = list.actionList.any { it.id == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD }
+                if (!canGoDown || n++ >= 6) { main.postDelayed({ if (searchOpen()) performGlobalAction(GLOBAL_ACTION_BACK); main.postDelayed(then, 250) }, 300); return }
+                val r = android.graphics.Rect().also { list.getBoundsInScreen(it) }
+                val x = r.exactCenterX()
+                swipe(x, r.top + r.height() * 0.62f, x, r.top + r.height() * 0.12f, 28)
+                main.postDelayed(this, 140)
             }
         }
         main.post(flick)
+    }
+
+    /** The keyboard is up, or a search box has focus: the drawer went into search. */
+    private fun searchOpen(): Boolean {
+        val ime = runCatching { windows.any { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD } }.getOrDefault(false)
+        if (ime) return true
+        val f = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        return f != null && f.isEditable
     }
 
     private fun label(n: AccessibilityNodeInfo): String =

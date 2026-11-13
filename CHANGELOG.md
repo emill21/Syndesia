@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.15.3 — 2026-11-12 · Search fix
+
+- Fixed: jumping to Private space could still open the app drawer's search. Syndesia now waits for the app list to open, flicks only inside it, stops as soon as it reaches the bottom (an extra flick there was opening search), and closes search if it pops up anyway
+- Update the phone app to get this
+
 ## 1.15.2 — 2026-11-12 · No more search
 
 - Fixed: jumping down to Private space tapped the app drawer's search bar. The flicks now start in the middle of the app list
